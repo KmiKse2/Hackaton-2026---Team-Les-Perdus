@@ -43,7 +43,7 @@ def analyze(accounts, balances, transactions, access, as_of, personalization=Tru
                "internal_transfers": 0, "unclassified_transactions": 0, "stale_balances": 0,
                "warnings": [], "coverage": [], "score_kind": "rule_weight_not_probability"}
     if blocked:
-        quality["warnings"].append("Analyse suspendue : consentement valide et permissions accounts + transactions nécessaires.")
+        quality["warnings"].append("Analysis paused: valid consent and accounts + transactions permissions are required.")
     for account in eligible.values() if not blocked else []:
         complete = bool(account.history_from and account.history_to and account.history_to >= as_of)
         days = (as_of - account.history_from).days if complete else 0
@@ -51,7 +51,7 @@ def analyze(accounts, balances, transactions, access, as_of, personalization=Tru
                                    "to": str(account.history_to) if account.history_to else None,
                                    "covered_days": days, "novelty_detection_allowed": complete and days >= 60})
         if not complete or days < 60:
-            quality["warnings"].append(f"{account.resource_id} : historique insuffisant pour affirmer la nouveauté d’un paiement.")
+            quality["warnings"].append(f"{account.resource_id} : insufficient history to establish a new payment.")
     rows = []
     if not blocked:
         for tx in transactions:
@@ -88,32 +88,32 @@ def analyze(accounts, balances, transactions, access, as_of, personalization=Tru
 
     for account in eligible.values() if not blocked and personalization else []:
         if account.details.get("cashAccountType") == "SVGS":
-            emit(account, "savings_account", "Compte d’épargne présent", [], fields=["cashAccountType"],
-                 limitations=["La présence d’un compte ne prouve pas une capacité d’épargne."])
+            emit(account, "savings_account", "Savings account present", [], fields=["cashAccountType"],
+                 limitations=["Having an account does not establish an ability to save."])
         history = sorted([r for r in rows if r["account_id"] == account.resource_id and not r["internal"]], key=lambda r: r["date"])
         recent = [r for r in history if r["date"] > cutoff]
         previous = [r for r in history if r["date"] <= cutoff]
         enough = bool(account.history_from and account.history_to and account.history_to >= as_of and (as_of - account.history_from).days >= 60)
         local = {}
         for category, kind, label, credit in [
-            ("salary", "new_salary", "Nouveau salaire codé SALA dans l’historique couvert", True),
-            ("rent", "new_rent", "Nouveau loyer codé RENT dans l’historique couvert", False),
-            ("energy", "new_energy", "Nouvelle dépense d’énergie", False),
+            ("salary", "new_salary", "New SALA-coded salary in the covered history", True),
+            ("rent", "new_rent", "New RENT-coded payment in the covered history", False),
+            ("energy", "new_energy", "New energy expense", False),
         ]:
             hits = [r for r in recent if r["category"] == category and (r["amount"] > 0 if credit else r["amount"] < 0)]
             old = [r for r in previous if r["category"] == category and (r["amount"] > 0 if credit else r["amount"] < 0)]
             reliable = [r for r in hits if r["method"] == "purposeCode"]
             if reliable and not old and enough:
-                local[kind] = emit(account, kind, label, reliable, limitations=["Nouveauté dans les données couvertes uniquement ; demander confirmation au client."])
+                local[kind] = emit(account, kind, label, reliable, limitations=["New within the covered data only; ask the customer to confirm."])
             elif hits and category == "salary":
-                emit(account, "salary_observed", "Versement évoquant un salaire", hits, "strong" if reliable else "weak",
-                     limitations=["Ne prouve ni la nouveauté, ni la récurrence, ni un premier emploi."])
-        for category, label in [("commute", "Paiement de transport local"), ("furniture", "Paiement de mobilier"),
-                                ("flight", "Paiement évoquant un transport aérien"), ("hotel", "Paiement évoquant un hébergement")]:
+                emit(account, "salary_observed", "Payment suggesting a salary", hits, "strong" if reliable else "weak",
+                     limitations=["Does not establish novelty, recurrence or a first job."])
+        for category, label in [("commute", "Local transport payment"), ("furniture", "Furniture payment"),
+                                ("flight", "Payment suggesting air travel"), ("hotel", "Payment suggesting accommodation")]:
             hits = [r for r in recent if r["category"] == category and r["amount"] < 0]
             if hits:
                 local[category] = emit(account, category, label, hits, "weak",
-                                       limitations=["Correspondance textuelle de commerçant ou de communication ; motif réel non confirmé."])
+                                       limitations=["Merchant or payment text match; actual purpose is unconfirmed."])
         salaries = defaultdict(list)
         for row in history:
             if row["data"].get("purposeCode") == "SALA" and row["amount"] > 0:
@@ -124,10 +124,10 @@ def analyze(accounts, balances, transactions, access, as_of, personalization=Tru
             if len(group) >= 2:
                 a, b = group[-2:]
                 if b["date"] > cutoff and 25 <= (b["date"] - a["date"]).days <= 35 and abs(b["amount"] - a["amount"]) / a["amount"] <= Decimal("0.2"):
-                    emit(account, "recurring_salary", "Salaire mensuel récurrent observé", [a, b],
+                    emit(account, "recurring_salary", "Recurring monthly salary observed", [a, b],
                          metrics={"interval_days": (b["date"] - a["date"]).days},
                          fields=["purposeCode", "debtorAccount/debtorName", "bookingDate", "transactionAmount"],
-                         limitations=["Récurrence sur deux observations ; ne garantit pas les revenus futurs."])
+                         limitations=["Recurrence based on two observations; future income is not guaranteed."])
                     break
         mandates = defaultdict(list)
         for row in history:
@@ -135,7 +135,7 @@ def analyze(accounts, balances, transactions, access, as_of, personalization=Tru
                 mandates[row["data"]["mandateId"]].append(row)
         for group in mandates.values():
             if len(group) >= 2 and group[-1]["date"] > cutoff and 25 <= (group[-1]["date"] - group[-2]["date"]).days <= 35:
-                emit(account, "recurring_mandate", "Prélèvement mensuel sur un même mandat", group[-2:],
+                emit(account, "recurring_mandate", "Monthly debit with the same mandate", group[-2:],
                      fields=["mandateId", "bookingDate", "transactionAmount"])
                 break
         rents = [r for r in history if r["data"].get("purposeCode") == "RENT" and r["amount"] < 0]
@@ -145,9 +145,9 @@ def analyze(accounts, balances, transactions, access, as_of, personalization=Tru
                 return account_number((r["data"].get("creditorAccount") or {}).get("iban")) or normalized(r["data"].get("creditorName"))
             increase = (abs(b["amount"]) / abs(a["amount"]) - 1) * 100
             if b["date"] > cutoff and 25 <= (b["date"] - a["date"]).days <= 35 and recipient(a) and recipient(a) == recipient(b) and increase >= 15:
-                emit(account, "rent_increase", "Hausse du loyer observée", [a, b], metrics={"increase_percent": str(round(increase, 2))},
+                emit(account, "rent_increase", "Rent increase observed", [a, b], metrics={"increase_percent": str(round(increase, 2))},
                      fields=["purposeCode", "creditorAccount/creditorName", "bookingDate", "transactionAmount"],
-                     limitations=["Une hausse de paiement ne prouve pas un déménagement."])
+                     limitations=["A payment increase does not prove a move."])
         rules = [("FIRST_JOB", {"new_salary": 55, "commute": 15}, {"new_salary", "commute"}),
                  ("MOVING", {"new_rent": 35, "furniture": 20, "new_energy": 20}, {"new_rent", "furniture", "new_energy"}),
                  ("TRAVEL", {"flight": 30, "hotel": 30}, {"flight", "hotel"})]
@@ -182,11 +182,11 @@ def analyze(accounts, balances, transactions, access, as_of, personalization=Tru
                 group["booked"] += amount
                 group["has_booked"] = True
                 if not blocked and personalization and account.details.get("cashAccountType") == "CACC" and amount < 0:
-                    emit(account, "negative_booked_balance", "Solde comptabilisé négatif", [], metrics={"amount": str(amount)},
+                    emit(account, "negative_booked_balance", "Negative booked balance", [], metrics={"amount": str(amount)},
                          fields=["balanceType", "balanceAmount", "referenceDate"],
-                         limitations=["Un solde négatif isolé ne suffit pas à conclure à une difficulté financière."])
+                         limitations=["An isolated negative balance does not establish financial difficulty."])
     if quality["stale_balances"]:
-        quality["warnings"].append("Soldes hors de la fenêtre de fraîcheur de 7 jours ignorés ; aucune estimation par addition des transactions.")
+        quality["warnings"].append("Balances outside the 7-day freshness window are ignored; no estimate is made by adding transactions.")
     currencies = sorted(set(groups) | {r["currency"] for r in rows})
     financials = []
     for currency in currencies:
@@ -209,7 +209,7 @@ def analyze(accounts, balances, transactions, access, as_of, personalization=Tru
     return {"as_of": as_of.isoformat(), "blocked": blocked, "signals": signals, "events": list(unique.values()),
             "quality": quality, "financial": financial,
             "transactions": [{"id": r["id"], "account_id": r["account_id"], "date": str(r["date"]),
-                              "merchant": r["data"].get("debtorName" if r["amount"] > 0 else "creditorName") or "Contrepartie non fournie",
+                              "merchant": r["data"].get("debtorName" if r["amount"] > 0 else "creditorName") or "Counterparty not supplied",
                               "amount": str(r["amount"]), "currency": r["currency"], "category": r["category"],
                               "internal_transfer": r["internal"], "booking_status": "booked"}
                              for r in sorted(rows, key=lambda r: (r["date"], r["id"]), reverse=True)]}

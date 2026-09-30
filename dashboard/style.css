@@ -41,3 +41,23 @@
 .catalog-row summary { display: flex; justify-content: space-between; gap: 10px; }
 .catalog-row small { font-size: 9px; color: #8b9cb3; }
 .catalog-row pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; background: #f6f8fc; padding: 12px; }
+
+.simulation-controls { flex-wrap: wrap; }
+.simulation-controls label { font-size: 12px; }
+#simulation-months { padding: 9px; border: 1px solid #dce5f1; border-radius: 8px; background: white; }
+#simulation-timeline { display: flex; flex-wrap: wrap; gap: 12px; padding-top: 14px; font-size: 12px; }
+.month-summary { display: grid; gap: 6px; padding: 12px; border: 1px solid #dce5f1; border-radius: 10px; }
+.month-summary small { color: #71829a; }
+.kate-chat { margin: 20px 0; padding: 14px; background: #f2f6fc; border-radius: 16px; }
+.kate-chat p { font-size: 12px; line-height: 1.6; }
+.chat-note { color: #71829a; font-size: 10px !important; }
+.proposal { display: grid; text-align: left; width: 100%; gap: 6px; margin: 8px 0; padding: 12px; border-radius: 10px; border: 1px solid #d3e1f8; background: white; color: #182744; cursor: pointer; }
+.proposal span { font-size: 11px; line-height: 1.5; }
+#chat-messages { max-height: 340px; overflow-y: auto; overflow-wrap: anywhere; }
+.chat-message { padding: 10px; margin: 10px 0; border-radius: 10px; background: white; }
+.chat-message.user { margin-left: 20px; background: #e1ecff; }
+.chat-message small { font-size: 10px; color: #557299; }
+.chat-message p { margin: 5px 0; }
+#chat-form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.chat-label { width: 100%; font-size: 11px; }
+#chat-input { flex: 1; min-width: 0; width: 100%; padding: 10px; border: 1px solid #d3e1f8; border-radius: 8px; }

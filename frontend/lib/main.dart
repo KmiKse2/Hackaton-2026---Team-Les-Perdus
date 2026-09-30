@@ -47,6 +47,8 @@ class _CustomerScreenState extends State<CustomerScreen> {
   bool _busy = false;
   String? _error;
   Timer? _poller;
+  final TextEditingController _chatInput = TextEditingController();
+  int _months = 1;
 
   @override
   void initState() {
@@ -59,6 +61,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
 
   @override
   void dispose() {
+    _chatInput.dispose();
     _poller?.cancel();
     _client.close();
     super.dispose();
@@ -75,8 +78,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
         .timeout(const Duration(seconds: 30));
     if (response.statusCode >= 400) {
       if (response.statusCode == 401) {
-        throw Exception(
-            'Jeton de démonstration requis. Configurez DEMO_API_TOKEN.');
+        throw Exception('Demo token requis. Configurez DEMO_API_TOKEN.');
       }
       throw Exception(
           'Le serveur ne peut pas traiter cette demande (${response.statusCode}).');
@@ -98,6 +100,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
       if (mounted) {
         setState(() {
           _state = result;
+          if (_selected != id) _chatInput.clear();
           _selected = id;
           _error = null;
         });
@@ -106,7 +109,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
       if (mounted) {
         setState(() {
           _error =
-              'Connexion impossible. Vérifiez l’API ($baseUrl) et le jeton de démonstration.';
+              'Connection failed. Check the API ($baseUrl) and the demo token.';
         });
       }
     } finally {
@@ -127,7 +130,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
     } catch (_) {
       if (mounted) {
         setState(() => _error =
-            'Action impossible. Vérifiez la connexion puis réessayez.');
+            'Unable to complete the action. Check your connection and try again.');
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -135,22 +138,22 @@ class _CustomerScreenState extends State<CustomerScreen> {
   }
 
   String _money(dynamic value, [String currency = 'EUR']) => value == null
-      ? 'Indisponible'
-      : '${double.parse(value.toString()).toStringAsFixed(2).replaceAll('.', ',')} ${currency == 'EUR' ? '€' : currency}';
+      ? 'Unavailable'
+      : '${double.parse(value.toString()).toStringAsFixed(2)} ${currency == 'EUR' ? '€' : currency}';
 
   Widget _profileCategory(Map<String, dynamic> category) {
     const labels = {
-      'student': 'Étudiant',
-      'employed': 'Salarié',
-      'self_employed': 'Indépendant',
-      'unemployed': 'Sans emploi',
-      'retired': 'Retraité',
-      'single': 'Célibataire',
-      'married': 'Marié',
-      'cohabiting': 'Cohabitant',
-      'divorced': 'Divorcé',
-      'under_18': 'Moins de 18 ans',
-      '66+': '66 ans et plus'
+      'student': 'Student',
+      'employed': 'Employed',
+      'self_employed': 'Self-employed',
+      'unemployed': 'Unemployed',
+      'retired': 'Retired',
+      'single': 'Single',
+      'married': 'Married',
+      'cohabiting': 'Cohabiting',
+      'divorced': 'Divorced',
+      'under_18': 'Under 18',
+      '66+': '66 and over'
     };
     final inferred = category['status'] == 'inferred';
     final value = category['value'];
@@ -169,8 +172,8 @@ class _CustomerScreenState extends State<CustomerScreen> {
         const SizedBox(height: 5),
         Text(
             inferred
-                ? 'Une hypothèse à confirmer avec vous.'
-                : 'Information fournie ou confirmée.',
+                ? 'A hypothesis for you to confirm.'
+                : 'Supplied or confirmed information.',
             style: const TextStyle(fontSize: 10, color: Colors.blueGrey)),
         if (inferred)
           Wrap(spacing: 8, children: [
@@ -179,13 +182,13 @@ class _CustomerScreenState extends State<CustomerScreen> {
                     ? null
                     : () => _mutate('categories/${category['key']}/feedback',
                         body: {'status': 'confirmed'}),
-                child: const Text('Confirmer')),
+                child: const Text('Confirm')),
             TextButton(
                 onPressed: _busy
                     ? null
                     : () => _mutate('categories/${category['key']}/feedback',
                         body: {'status': 'rejected'}),
-                child: const Text('Ce n’est pas le cas')),
+                child: const Text('That is not right')),
           ]),
       ]),
     );
@@ -211,14 +214,14 @@ class _CustomerScreenState extends State<CustomerScreen> {
         if (confirmed)
           const Padding(
               padding: EdgeInsets.only(bottom: 8),
-              child: Text('✓ Confirmé par vous',
+              child: Text('✓ Confirmed by you',
                   style: TextStyle(color: Color(0xFF329C83), fontSize: 11))),
         Text(copy['title'] as String,
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
         const SizedBox(height: 8),
         Text(
             confirmed
-                ? 'Merci pour votre réponse. Avançons à votre rythme.'
+                ? 'Thank you for your reply. Let us take the next step at your pace.'
                 : copy['message'] as String,
             style: const TextStyle(height: 1.6, color: Color(0xFF64748B))),
         const SizedBox(height: 14),
@@ -229,13 +232,13 @@ class _CustomerScreenState extends State<CustomerScreen> {
                     ? null
                     : () => _mutate('insights/${event['id']}/feedback',
                         body: {'status': 'confirmed'}),
-                child: const Text('Oui, c’est le cas')),
+                child: const Text('Yes, that is right')),
             OutlinedButton(
                 onPressed: _busy
                     ? null
                     : () => _mutate('insights/${event['id']}/feedback',
                         body: {'status': 'dismissed'}),
-                child: const Text('Non')),
+                child: const Text('No')),
           ])
         else
           TextButton.icon(
@@ -247,13 +250,98 @@ class _CustomerScreenState extends State<CustomerScreen> {
                       actions: [
                         TextButton(
                             onPressed: () => Navigator.pop(context),
-                            child: const Text('Compris'))
+                            child: const Text('Got it'))
                       ],
                     )),
             icon: const Icon(Icons.arrow_forward, size: 17),
             label: Text(copy['action'] as String),
           ),
       ]),
+    );
+  }
+
+  Widget _chat() {
+    final chat = _state?['chat'] as Map<String, dynamic>?;
+    if (chat == null) return const SizedBox.shrink();
+    final blocked = chat['blocked'] == true;
+    final options = chat['proposals'] as List<dynamic>;
+    final messages = chat['messages'] as List<dynamic>;
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 16),
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Chat with Kate', style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 6),
+          const Text('Local demo · no live quotes or orders',
+              style: TextStyle(fontSize: 11, color: Colors.blueGrey)),
+          const SizedBox(height: 12),
+          Text(
+              blocked ? 'Personalisation is paused.' : chat['intro'] as String),
+          ...options.map((dynamic p) => Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: OutlinedButton(
+                  onPressed: _busy
+                      ? null
+                      : () => _mutate('chat', body: {'proposal_id': p['id']}),
+                  child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(p['title'] as String,
+                                style: const TextStyle(
+                                    fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 5),
+                            Text(
+                                '${p['requires_confirmation'] == true ? 'If this applies to you: ' : ''}${p['description']}',
+                                style: const TextStyle(fontSize: 12)),
+                          ])),
+                ),
+              )),
+          ...messages.map((dynamic m) => Container(
+                width: double.infinity,
+                margin: EdgeInsets.only(
+                    top: 10, left: m['role'] == 'user' ? 18 : 0),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                    color: m['role'] == 'user'
+                        ? const Color(0xFFE1ECFF)
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(10)),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(m['role'] == 'user' ? 'You' : 'Kate · demo',
+                          style: const TextStyle(
+                              fontSize: 10, color: Colors.blueGrey)),
+                      const SizedBox(height: 5),
+                      Text(m['text'] as String),
+                    ]),
+              )),
+          const SizedBox(height: 12),
+          TextField(
+              controller: _chatInput,
+              enabled: !blocked && !_busy,
+              maxLength: 1000,
+              minLines: 1,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                  labelText: 'Your message',
+                  hintText: 'Ask about a suggested option…',
+                  border: OutlineInputBorder())),
+          FilledButton(
+              onPressed: blocked || _busy
+                  ? null
+                  : () async {
+                      final message = _chatInput.text.trim();
+                      if (message.isEmpty) return;
+                      await _mutate('chat', body: {'message': message});
+                      if (mounted && _error == null) _chatInput.clear();
+                    },
+              child: const Text('Send')),
+        ]),
+      ),
     );
   }
 
@@ -285,10 +373,10 @@ class _CustomerScreenState extends State<CustomerScreen> {
               style: TextStyle(fontWeight: FontWeight.w800, color: brandBlue)),
           actions: [
             const Center(
-                child: Text('DÉMO',
+                child: Text('DEMO',
                     style: TextStyle(fontSize: 10, color: Colors.blueGrey))),
             IconButton(
-                tooltip: 'Actualiser',
+                tooltip: 'Refresh',
                 onPressed:
                     _busy ? null : () => _load(initial: _customers.isEmpty),
                 icon: const Icon(Icons.refresh)),
@@ -321,13 +409,13 @@ class _CustomerScreenState extends State<CustomerScreen> {
                             .toList()),
                   const SizedBox(height: 28),
                   if (customer != null && financial != null) ...[
-                    const Text('UN REGARD SUR VOS FINANCES',
+                    const Text('A LOOK AT YOUR FINANCES',
                         style: TextStyle(
                             fontSize: 10,
                             letterSpacing: 1.7,
                             color: Colors.blueGrey)),
                     const SizedBox(height: 8),
-                    Text('Bonjour ${customer['name']} ☀',
+                    Text('Hello ${customer['name']} ☀',
                         style: Theme.of(context).textTheme.headlineMedium),
                     const SizedBox(height: 24),
                     Container(
@@ -339,7 +427,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
                         child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Disponible observé',
+                              const Text('Available balance',
                                   style: TextStyle(color: Colors.white70)),
                               const SizedBox(height: 12),
                               Text(_money(financial['balance'], currency),
@@ -349,7 +437,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
                                       color: Colors.white)),
                               const SizedBox(height: 16),
                               Text(
-                                  'Soldes bancaires · $currency · ${_state?['analysis_date']}',
+                                  'Bank balances · $currency · ${_state?['analysis_date']}',
                                   style: const TextStyle(
                                       fontSize: 11, color: Colors.white70)),
                             ])),
@@ -359,14 +447,14 @@ class _CustomerScreenState extends State<CustomerScreen> {
                           padding: const EdgeInsets.only(top: 12),
                           child: Text(
                             financial['credit_limit_included'] == true
-                                ? 'Le disponible inclut une limite de crédit. Il ne représente pas uniquement vos fonds propres.'
-                                : 'L’inclusion éventuelle d’une limite de crédit n’est pas renseignée.',
+                                ? 'The available balance includes a credit limit, so it is not all your own money.'
+                                : 'Whether a credit limit is included is unknown.',
                             style: const TextStyle(
                                 fontSize: 12, color: Color(0xFF866630)),
                           )),
                     const SizedBox(height: 12),
                     Text(
-                        'Solde comptabilisé : ${_money(financial['booked_balance'], currency)}',
+                        'Booked balance: ${_money(financial['booked_balance'], currency)}',
                         style: const TextStyle(
                             fontSize: 12, color: Colors.blueGrey)),
                     if (accounts.isNotEmpty)
@@ -377,7 +465,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
                               children: accounts
                                   .map((dynamic a) => Chip(
                                         label: Text(
-                                            '${a['name'] ?? 'Compte'} · ${a['currency']}',
+                                            '${a['name'] ?? 'Account'} · ${a['currency']}',
                                             style:
                                                 const TextStyle(fontSize: 10)),
                                       ))
@@ -390,10 +478,10 @@ class _CustomerScreenState extends State<CustomerScreen> {
                               color: const Color(0xFFFFF4DF),
                               borderRadius: BorderRadius.circular(12)),
                           child: const Text(
-                              'La personnalisation est suspendue. Les suggestions restent masquées tant que les consentements nécessaires ne sont pas actifs.',
+                              'Personalisation is paused. Suggestions stay hidden until the required consent is active.',
                               style: TextStyle(fontSize: 12, height: 1.6))),
                     const SizedBox(height: 26),
-                    Text('Pour vous',
+                    Text('For you',
                         style: Theme.of(context).textTheme.titleLarge),
                     const SizedBox(height: 14),
                     if (events.isEmpty && !suspended)
@@ -408,25 +496,26 @@ class _CustomerScreenState extends State<CustomerScreen> {
                               children: [
                                 Icon(Icons.auto_awesome, color: brandBlue),
                                 SizedBox(height: 12),
-                                Text('À vos côtés, au bon moment.',
+                                Text('Here for you at the right time.',
                                     style:
                                         TextStyle(fontWeight: FontWeight.w700)),
                                 SizedBox(height: 8),
                                 Text(
-                                    'Vous gardez le contrôle. Les suggestions apparaissent lorsqu’un changement est détecté.',
+                                    'You stay in control. Suggestions appear when a change is detected.',
                                     style: TextStyle(
                                         color: Colors.blueGrey, height: 1.6))
                               ])),
                     ...events.map(_insight),
+                    _chat(),
                     if (categories.isNotEmpty) ...[
                       const SizedBox(height: 16),
-                      Text('Votre profil',
+                      Text('Your profile',
                           style: Theme.of(context).textTheme.titleLarge),
                       const SizedBox(height: 12),
                       ...categories.map(_profileCategory),
                     ],
                     const SizedBox(height: 12),
-                    Text('Dernières opérations',
+                    Text('Recent transactions',
                         style: Theme.of(context).textTheme.titleLarge),
                     const SizedBox(height: 8),
                     ...transactions.take(8).map((dynamic t) => ListTile(
@@ -454,32 +543,59 @@ class _CustomerScreenState extends State<CustomerScreen> {
                                           : ink)),
                         )),
                     const Divider(height: 36),
-                    const Text('COMMANDES DE DÉMONSTRATION',
+                    const Text('DEMO CONTROLS',
                         style: TextStyle(
                             fontSize: 10,
                             color: Colors.blueGrey,
                             letterSpacing: 1)),
                     const SizedBox(height: 12),
                     Wrap(spacing: 8, runSpacing: 8, children: [
-                      FilledButton.icon(
-                          onPressed: _busy ||
-                                  !canSimulate ||
-                                  customer['simulated'] == true
+                      DropdownButton<int>(
+                          value: _months,
+                          items: [1, 3, 6, 12]
+                              .map((n) => DropdownMenuItem(
+                                  value: n,
+                                  child: Text(
+                                      '$n ${n == 1 ? 'month' : 'months'}')))
+                              .toList(),
+                          onChanged: _busy
                               ? null
-                              : () => _mutate('simulate'),
+                              : (n) => setState(() => _months = n!)),
+                      FilledButton.icon(
+                          onPressed: _busy || !canSimulate
+                              ? null
+                              : () => _mutate('simulate', body: {
+                                    'months': _months,
+                                    'expected_as_of': _state!['analysis_date']
+                                  }),
                           icon: const Icon(Icons.play_arrow),
-                          label: Text(customer['simulated'] == true
-                              ? 'Septembre simulé'
-                              : 'Simuler septembre')),
+                          label: const Text('Simulate next months')),
                       OutlinedButton(
                           onPressed: _busy || !canSimulate
                               ? null
                               : () => _mutate('reset'),
-                          child: const Text('Réinitialiser')),
+                          child: const Text('Reset')),
                     ]),
+                    if ((_state?['simulation_timeline'] as List<dynamic>? ?? [])
+                        .isNotEmpty)
+                      ExpansionTile(
+                          title: const Text('Monthly simulation history'),
+                          children: [
+                            ...(_state!['simulation_timeline'] as List<dynamic>)
+                                .map((dynamic m) => ListTile(
+                                      title: Text(m['month'] as String),
+                                      subtitle: Text(
+                                          (m['events'] as List<dynamic>)
+                                              .join(' · ')),
+                                      trailing: Text(_money(
+                                          m['financial']['booked_balance'],
+                                          m['financial']['currency']
+                                              as String)),
+                                    )),
+                          ]),
                     const SizedBox(height: 24),
                     const Text(
-                        'Profils fictifs · Aperçu local pour Kate\nAucun appel à Kate. Sans affiliation officielle à KBC.',
+                        'Demo profiles · Local Kate preview\nNo connection to Kate. Not officially affiliated with KBC.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                             fontSize: 10, color: Colors.blueGrey, height: 1.7)),

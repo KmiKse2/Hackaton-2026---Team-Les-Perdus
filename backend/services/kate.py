@@ -1,9 +1,9 @@
 """A local handoff contract. No Kate endpoint or credentials are invented."""
 
 COPY = {
-    "FIRST_JOB": {"label": "Nouvelle activité salariée possible", "title": "Vos revenus évoluent ?", "message": "Un salaire apparaît dans la période observée, avec des dépenses de transport. Votre activité professionnelle a-t-elle changé ?", "action": "Préparer mon budget", "tip": "Listez vos dépenses fixes avant d’adapter votre budget."},
-    "MOVING": {"label": "Déménagement possible", "title": "Un nouveau chez-vous ?", "message": "Un nouveau loyer, du mobilier et des dépenses d’énergie apparaissent ensemble. Avez-vous déménagé ?", "action": "Organiser mon installation", "tip": "Faites le point sur votre adresse, vos contrats et votre budget logement."},
-    "TRAVEL": {"label": "Voyage possible", "title": "Une escapade en vue ?", "message": "Des paiements évoquent un transport aérien et un hébergement. Préparez-vous un voyage ?", "action": "Préparer mon voyage", "tip": "Vérifiez les conditions de votre carte à destination et préparez votre budget."},
+    "FIRST_JOB": {"label": "Possible employment change", "title": "Is your income changing?", "message": "A salary and commuting expenses appear in the observed period. Has your work situation changed?", "action": "Plan my budget", "tip": "List your fixed expenses before adjusting your budget."},
+    "MOVING": {"label": "Possible move", "title": "A new home?", "message": "New rent, furniture and energy expenses appear together. Have you moved?", "action": "Plan my move", "tip": "Review your address, contracts and housing budget."},
+    "TRAVEL": {"label": "Possible trip", "title": "Planning a trip?", "message": "Payments suggest flights and accommodation. Are you planning a trip?", "action": "Plan my trip", "tip": "Check your card conditions at your destination and prepare a budget."},
 }
 
 
@@ -25,8 +25,8 @@ def handoff(analysis, events):
                          for s in analysis["signals"]],
         "hypotheses": hypotheses, "rejected_hypotheses": sorted(rejected),
         "data_quality": analysis["quality"],
-        "instructions": ["Les scores sont des poids de règles, pas des probabilités.",
-                         "Ne pas réintroduire une hypothèse refusée par le client.",
-                         "Un salaire observé ne prouve ni un premier emploi ni une récurrence.",
-                         "Les messages de l’interface sont des aperçus locaux, pas des réponses de Kate."],
+        "instructions": ["Scores are rule weights, not probabilities.",
+                         "Do not reintroduce a hypothesis the customer has dismissed.",
+                         "An observed salary proves neither a first job nor recurring income.",
+                         "Interface messages are local previews, not responses from Kate."],
     }

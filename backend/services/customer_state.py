@@ -15,9 +15,9 @@ from .engine import account_number, classify, normalized
 D = Decimal
 ZERO = D(0)
 LOANS = {"mortgage", "car_loan", "personal_loan"}
-STATE_LABELS = {"student": "Étudiant", "young_professional": "Jeune actif", "first_job": "Premier emploi possible",
-                "moving": "Déménagement", "home_purchase": "Projet immobilier", "travelling": "Voyage en préparation",
-                "financial_stress": "Tension de trésorerie possible", "wealth_growth": "Épargne en hausse"}
+STATE_LABELS = {"student": "Student", "young_professional": "Young professional", "first_job": "Possible first job",
+                "moving": "Moving", "home_purchase": "Home purchase", "travelling": "Planning a trip",
+                "financial_stress": "Possible cash flow pressure", "wealth_growth": "Growing savings"}
 
 
 def month_start(day):
@@ -131,9 +131,9 @@ def compute_catalog(db, customer_id, analysis, access, accounts, balances):
         if fresh(fact, as_of):
             value = age_group(age_at(date.fromisoformat(fact["value"]), as_of)) if name == "date_of_birth" else fact["value"]
             set_signal(catalog, target, value, source=fact["source"], status="confirmed", timestamp=fact["observed_at"],
-                       limitations=["Information déclarée ou fournie par la source ; 1.0 ne constitue pas une validation indépendante."])
+                       limitations=["Declared or source-provided information; 1.0 does not represent independent verification."])
         else:
-            catalog[target].update(status="expired", availability="expired", limitations=["Information future ou périmée à la date d’analyse/consultation."])
+            catalog[target].update(status="expired", availability="expired", limitations=["Information is future-dated or expired at the analysis/access date."])
     eligible = [a for a in accounts if a.details.get("usage") == "PRIV" and a.details["status"] == "enabled"]
     rows = prepare_rows(db, accounts, as_of)
     external = [r for r in rows if not r["counterpart"]]
@@ -160,15 +160,15 @@ def compute_catalog(db, customer_id, analysis, access, accounts, balances):
         recurring_rows = [r for r in external if r["id"] in recurring_ids and month_start(r["date"]) in complete]
         totals = amounts_by_currency(recurring_rows)
         put("monthly_income", [{"currency": c, "amount": str(round(v / len(complete), 2)), "months": len(complete)} for c, v in sorted(totals.items())], ids(recurring_rows), .9,
-            limitations=["Moyenne des encaissements récurrents observés sur les mois entièrement couverts, pas une garantie de revenu."])
+            limitations=["Average observed recurring inflows across fully covered months, not guaranteed income."])
     if recent:
         sources = sorted({r["source_type"] for r in recent if r["amount"] > 0})
         if sources:
             put("income_source_type", sources, ids([r for r in recent if r["amount"] > 0]), .65, status="inferred",
-                limitations=["Codes structurés ou libellés ; le type de revenu n’établit pas un statut professionnel."])
+                limitations=["Structured codes or labels; income type does not establish employment status."])
         grants = [r for r in recent if r["source_type"] == "student_grant"]
         put("student_grant_detected", bool(grants), ids(grants), .75, status="inferred",
-            limitations=["Correspondance de code ou de libellé ; payeur institutionnel non vérifié dans ce PoC."])
+            limitations=["Code or text match; institutional payer is not verified in this PoC."])
     new_salary = []
     for group in salary_patterns:
         first = group[0]
@@ -178,7 +178,7 @@ def compute_catalog(db, customer_id, analysis, access, accounts, balances):
             new_salary.extend(group)
     if covered(as_of - timedelta(days=89), as_of):
         put("new_recurring_salary", bool(new_salary), ids(new_salary), .9,
-            limitations=["Au moins deux occurrences et une période antérieure couverte sans salaire ; nouveauté limitée à l’historique fourni."])
+            limitations=["At least two occurrences and prior coverage without salary; novelty is limited to supplied history."])
     missed = []
     for group in salary_patterns:
         due = shift_month(group[-1]["date"], 1)
@@ -190,7 +190,7 @@ def compute_catalog(db, customer_id, analysis, access, accounts, balances):
             missed.append({"currency": group[-1]["currency"], "missed_cycles": cycles})
     if salary_patterns and covered(min(g[0]["date"] for g in salary_patterns), as_of):
         put("salary_stopped", {"detected": bool(missed), "patterns": missed}, ids([r for g in salary_patterns for r in g]), .8,
-            limitations=["Tolérance de sept jours après la date attendue ; absence de salaire ne signifie pas chômage."])
+            limitations=["Seven-day grace period after the expected date; a missing salary does not mean unemployment."])
     if patterns:
         put("recurring_expenses", [{"currency": g[-1]["currency"], "amount": str(round(sum(abs(r["amount"]) for r in g) / len(g), 2)),
              "category": g[-1]["category"], "occurrences": len(g), "last_date": str(g[-1]["date"])} for g in expense_patterns],
@@ -199,14 +199,14 @@ def compute_catalog(db, customer_id, analysis, access, accounts, balances):
     if covered(as_of - timedelta(days=89), as_of):
         new_rents = [g for g in rents if g[-1]["date"] > cutoff and not any(r["date"] < g[0]["date"] and r["category"] == "rent" and r["amount"] < 0 for r in external)]
         put("new_rent_payment", bool(new_rents), ids([r for g in new_rents for r in g]), .85,
-            limitations=["Une seule occurrence de loyer ne suffit pas à établir une nouvelle récurrence."])
+            limitations=["One rent payment is not enough to establish a new recurring payment."])
 
     if last_month in complete:
         current = [r for r in external if month_start(r["date"]) == last_month]
         incomes = {c: sum((r["amount"] for r in current if r["currency"] == c and r["amount"] > 0), ZERO) for c in currencies}
         expenses = {c: -sum((r["amount"] for r in current if r["currency"] == c and r["amount"] < 0), ZERO) for c in currencies}
         put("monthly_expenses", [{"currency": c, "amount": str(v), "month": str(last_month)[:7]} for c, v in expenses.items()], ids(current), 1,
-            limitations=["Total sur les comptes autorisés et les mois complets uniquement, hors transferts propres."])
+            limitations=["Totals cover authorised accounts and complete months only, excluding own transfers."])
         savings_flows = defaultdict(Decimal)
         withdrawals = []
         for r in rows:
@@ -218,9 +218,9 @@ def compute_catalog(db, customer_id, analysis, access, accounts, balances):
                     withdrawals.append(r)
         rates = [{"currency": c, "net_savings_flow": str(savings_flows[c]), "rate_percent": str(round(savings_flows[c] / incomes[c] * 100, 2))} for c in currencies if incomes[c] > 0]
         if rates:
-            put("monthly_savings_rate", rates, confidence=1, limitations=["Transferts nets vers les comptes SVGS identifiés, pas le rendement ni l’intégralité du patrimoine."])
+            put("monthly_savings_rate", rates, confidence=1, limitations=["Net transfers to identified SVGS accounts, not returns or total wealth."])
         put("savings_withdrawal_detected", {"detected": bool(withdrawals), "threshold": "500 units per currency", "transaction_ids": ids(withdrawals)}, ids(withdrawals), 1,
-            limitations=["Seuil de démonstration fixe ; aucune interprétation de la raison du retrait."])
+            limitations=["Fixed demo threshold; no inference about the reason for withdrawal."])
         if len(complete) == 3:
             previous = [r for r in external if month_start(r["date"]) in complete[:-1]]
             for key, positive in [("income_change_percentage", True), ("expense_change_percentage", False)]:
@@ -229,7 +229,7 @@ def compute_catalog(db, customer_id, analysis, access, accounts, balances):
                     avg = sum((abs(r["amount"]) for r in previous if r["currency"] == c and (r["amount"] > 0 if positive else r["amount"] < 0)), ZERO) / 2
                     now = incomes[c] if positive else expenses[c]
                     changes.append({"currency": c, "current": str(now), "previous_average": str(avg), "percentage": percent(now, avg)})
-                put(key, changes, ids(previous + current), 1, limitations=["Dernier mois complet comparé à la moyenne des deux précédents ; pourcentage indéfini si la base est zéro."])
+                put(key, changes, ids(previous + current), 1, limitations=["Latest complete month compared with the previous two-month average; percentage is undefined for a zero baseline."])
             housing = {"rent", "energy", "furniture"}
             house_changes, distributions = [], []
             for c in currencies:
@@ -245,16 +245,16 @@ def compute_catalog(db, customer_id, analysis, access, accounts, balances):
                         b = -sum((r["amount"] for r in new if r["category"] == category), ZERO) / new_total * 100
                         distributions.append({"currency": c, "category": category, "previous_share": str(round(a, 2)), "current_share": str(round(b, 2)), "change_points": str(round(b-a, 2))})
             put("housing_spending_increase", house_changes, ids(previous + current), .75,
-                limitations=["Calcul exact sur des catégories en partie textuelles ; qualité de classement distincte du calcul."])
+                limitations=["Exact calculation using partly text-based categories; classification quality is separate from arithmetic accuracy."])
             put("spending_category_shift", distributions, ids(previous + current), .75)
 
     travel = [r for r in recent if r["amount"] < 0 and r["category"] in {"flight", "hotel"}]
     put("travel_spending_detected", bool(travel), ids(travel), .65, status="inferred",
-        limitations=["Libellés de commerçants ; ne prouve pas que le client voyage personnellement."])
+        limitations=["Merchant labels do not prove the customer is personally travelling."])
     foreign = [r for r in recent if r["amount"] < 0 and (r["currency"] != "EUR" or (r["payload"].get("merchantCountry") and r["payload"]["merchantCountry"] != "BE"))]
     if any(r["payload"].get("merchantCountry") or r["currency"] != "EUR" for r in recent):
         put("foreign_transaction_activity", bool(foreign), ids(foreign), 1,
-            limitations=["Référence de la démo : Belgique/EUR. Devise ou pays du commerçant ne prouve pas un déplacement physique."])
+            limitations=["Demo reference: Belgium/EUR. Merchant country or currency does not prove physical travel."])
     anomalies = []
     enough_baseline = False
     for r in recent:
@@ -270,7 +270,7 @@ def compute_catalog(db, customer_id, analysis, access, accounts, balances):
                 anomalies.append({"transaction_id": r["id"], "currency": r["currency"], "amount": str(abs(r["amount"])), "z_score": round(z, 2) if z is not None else None})
     if enough_baseline:
         put("unusual_spending", anomalies, [a["transaction_id"] for a in anomalies], .7, status="inferred",
-            limitations=["Au moins 5 dépenses de référence par catégorie ; >2× la moyenne, +100 unités et z≥3 si variance non nulle. Ce n’est pas une probabilité de fraude."])
+            limitations=["At least 5 reference expenses per category; >2x average, +100 units and z>=3 for non-zero variance. This is not a fraud probability."])
 
     histories = list(db.scalars(select(BalanceObservation).where(BalanceObservation.account_id.in_([a.resource_id for a in eligible]), BalanceObservation.reference_date <= as_of))) if "balances" in access["effective_permissions"] else []
     account_currencies = {a.resource_id: a.details["currency"] for a in eligible}
@@ -287,7 +287,7 @@ def compute_catalog(db, customer_id, analysis, access, accounts, balances):
             for a in target:
                 totals[a.details["currency"]] += D(selected_balances[a.resource_id].payload["balanceAmount"]["amount"])
             put(key, [{"currency": c, "amount": str(v), "balance_type": "booked"} for c, v in sorted(totals.items())], confidence=1,
-                limitations=["Comptes privés autorisés uniquement ; snapshots comptabilisés de moins de 8 jours."])
+                limitations=["Authorised private accounts only; booked snapshots less than 8 days old."])
     compute_history(catalog, histories, eligible, as_of, months)
     compute_forecast(catalog, selected_balances, eligible, patterns, as_of, covered)
     compute_products_usage(catalog, context, as_of)
@@ -328,7 +328,7 @@ def compute_history(catalog, histories, accounts, as_of, months):
                 delta = after - before
                 margin = max(D(10), abs(before) * D('.02'))
                 values.append({"currency": c, "direction": "increasing" if delta > margin else "decreasing" if delta < -margin else "stable", "change": str(delta)})
-            set_signal(catalog, "savings_trend", values, limitations=["Trois snapshots mensuels récents par compte ; seuil de stabilité 2 % ou 10 unités."])
+            set_signal(catalog, "savings_trend", values, limitations=["Three recent monthly snapshots per account; stability threshold of 2% or 10 units."])
     overdrafts = []
     for a in accounts:
         if a.details.get("cashAccountType") != "CACC":
@@ -342,7 +342,7 @@ def compute_history(catalog, histories, accounts, as_of, months):
     current = [a for a in accounts if a.details.get("cashAccountType") == "CACC"]
     if current and len(overdrafts) == len(current):
         set_signal(catalog, "overdraft_frequency", overdrafts,
-                   limitations=["30 jours consécutifs de soldes comptabilisés ; une période débutant négative compte comme un épisode observé."])
+                   limitations=["30 consecutive days of booked balances; a period starting negative counts as an observed episode."])
 
 
 def compute_forecast(catalog, balances, accounts, patterns, as_of, covered):
@@ -370,7 +370,7 @@ def compute_forecast(catalog, balances, accounts, patterns, as_of, covered):
         forecasts.append({"currency": account.details["currency"], "until": str(until), "projected_booked_balance": str(round(projected, 2)), "risk": projected < 0})
     if forecasts:
         set_signal(catalog, "low_balance_risk", forecasts, source="inferred", status="inferred", confidence=.6,
-                   limitations=["Projection indicative : uniquement échéances récurrentes connues, sans dépenses imprévues ni mouvements en attente. Ne constitue pas une évaluation de solvabilité."])
+                   limitations=["Indicative forecast using known recurring payments only, excluding unexpected expenses and pending transactions. Not a creditworthiness assessment."])
 
 
 def compute_products_usage(catalog, context, as_of):
@@ -399,7 +399,7 @@ def compute_products_usage(catalog, context, as_of):
             set_signal(catalog, "investment_balance", [{"currency": c, "amount": str(v)} for c, v in sorted(totals.items())], timestamp=snapshot["observed_at"])
     elif snapshot:
         for key in ("loan_products", "owned_kbc_products", "mortgage_started", "monthly_loan_commitment", "investment_balance"):
-            catalog[key].update(availability="unavailable", limitations=["Snapshot produits incomplet, périmé ou futur."])
+            catalog[key].update(availability="unavailable", limitations=["Incomplete, expired or future-dated product snapshot."])
     usage = context.usage
     if usage and date.fromisoformat(usage["to_date"]) <= as_of and (as_of - date.fromisoformat(usage["to_date"])).days <= 30:
         mobile = [s for s in usage["sessions"] if s["channel"] == "mobile"]
@@ -435,7 +435,7 @@ def categorize(catalog, analysis, responses, as_of):
     if work == "student":
         category("student", STATE_LABELS["student"], ["employment_status"], 1, "confirmed", catalog["employment_status"]["source"])
     elif work in (None, "unknown") and value("student_grant_detected") is True:
-        category("student", "Profil étudiant possible", ["student_grant_detected"], .65)
+        category("student", "Possible student profile", ["student_grant_detected"], .65)
     if value("age_group") in {"18-25", "26-35"} and (work in {"employed", "self_employed"} or (work in (None, "unknown") and "salary" in (value("income_source_type") or []))):
         category("young_professional", STATE_LABELS["young_professional"], ["age_group", "employment_status" if work else "income_source_type"], .8)
     if work == "student" and value("new_recurring_salary") is True:
@@ -463,7 +463,7 @@ def categorize(catalog, analysis, responses, as_of):
         if item is None:
             item = {"key": response.category, "label": STATE_LABELS[response.category], "value": True, "evidence": []}
             categories.append(item)
-        expired = response.valid_until < today() or (not still_supported and response.status == "confirmed" and response.category in {"student", "young_professional"})
+        expired = response.valid_until < max(today(), as_of) or (not still_supported and response.status == "confirmed" and response.category in {"student", "young_professional"})
         item.update(status="expired" if expired else response.status, source="kate_confirmation", confidence=None if expired else 1,
                     confidence_kind="customer_response", timestamp=str(response.observed_at), valid_until=str(response.valid_until))
     return categories

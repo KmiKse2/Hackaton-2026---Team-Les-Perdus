@@ -29,7 +29,7 @@ def access_for(db, customer_id):
 def require_access(db, customer_id, permissions, account_ids=()):
     access = access_for(db, customer_id)
     if not set(permissions).issubset(access["effective_permissions"]) or not set(account_ids).issubset(access["account_ids"]):
-        raise HTTPException(403, "Consentement invalide, permission absente ou compte hors du périmètre autorisé")
+        raise HTTPException(403, "Invalid consent, missing permission or account outside the authorised scope")
     return access
 
 
@@ -38,10 +38,10 @@ def set_consent(db, customer_id, payload: AccountAccess):
     for resource_id in payload.accountResourceIds:
         account = db.get(Account, resource_id)
         if account and account.customer_id != customer_id:
-            raise HTTPException(403, "Compte rattaché à un autre client")
+            raise HTTPException(403, "Account belongs to another customer")
     other = db.scalar(select(Consent).where(Consent.consent_id == payload.consentId, Consent.customer_id != customer_id))
     if other:
-        raise HTTPException(409, "Identifiant de consentement déjà utilisé")
+        raise HTTPException(409, "Consent ID already in use")
     consent = db.get(Consent, customer_id)
     if consent is None:
         consent = Consent(customer_id=customer_id, consent_id=payload.consentId, sync_count=0)
@@ -61,10 +61,10 @@ def store_import(db, customer_id, payload: BankingImport, automatic=False):
     access = require_access(db, customer_id, required, [a.details.resourceId for a in payload.accounts])
     consent = db.get(Consent, customer_id)
     if consent.consent_id != payload.consentId:
-        raise HTTPException(403, "Le consentement ne correspond pas au client")
+        raise HTTPException(403, "Consent does not match the customer")
     if automatic:
         if access["automatic_syncs_remaining"] < 1:
-            raise HTTPException(429, "Budget quotidien de synchronisation automatique épuisé")
+            raise HTTPException(429, "Daily automatic sync budget exhausted")
         day = today()
         result = db.execute(update(Consent).where(
             Consent.customer_id == customer_id,
@@ -72,24 +72,24 @@ def store_import(db, customer_id, payload: BankingImport, automatic=False):
                 Consent.sync_count < consent.payload["frequencyPerDay"]),
         ).values(sync_day=day, sync_count=case((Consent.sync_day == day, Consent.sync_count + 1), else_=1)))
         if result.rowcount != 1:
-            raise HTTPException(429, "Budget quotidien de synchronisation automatique épuisé")
+            raise HTTPException(429, "Daily automatic sync budget exhausted")
     profile = db.get(BankProfile, customer_id)
     if profile is None:
         profile = BankProfile(customer_id=customer_id, as_of=payload.asOf)
         db.add(profile)
     elif payload.asOf < profile.as_of:
-        raise HTTPException(409, "Snapshot antérieur à la date d’analyse actuelle")
+        raise HTTPException(409, "Snapshot predates the current analysis date")
     profile.as_of = payload.asOf
     for item in payload.accounts:
         resource_id = item.details.resourceId
         account = db.get(Account, resource_id)
         if account and account.customer_id != customer_id:
-            raise HTTPException(403, "Compte rattaché à un autre client")
+            raise HTTPException(403, "Account belongs to another customer")
         if account is None:
             account = Account(resource_id=resource_id, customer_id=customer_id)
             db.add(account)
         elif account.details["currency"] != item.details.currency and (item.balances is None or item.transactions is None):
-            raise HTTPException(422, "Changer la devise exige de remplacer soldes et transactions ensemble")
+            raise HTTPException(422, "Changing currency requires replacing balances and transactions together")
         account.details = item.details.model_dump(mode="json", exclude_none=True)
         if item.transactions is not None:
             account.history_from, account.history_to = item.historyFrom, item.historyTo
@@ -109,7 +109,7 @@ def store_import(db, customer_id, payload: BankingImport, automatic=False):
                     row = existing.get(tx.transactionId)
                     # Never demote a posted transaction when an upstream snapshot is delayed.
                     if row is not None and row.booking_status == "booked" and status == "pending":
-                        raise HTTPException(409, "Une opération comptabilisée ne peut pas redevenir pending")
+                        raise HTTPException(409, "A booked transaction cannot revert to pending")
                     if row is None:
                         row = BankTransaction(account_id=resource_id, transaction_id=tx.transactionId)
                         db.add(row)
@@ -139,7 +139,7 @@ def inspect(db, customer_id):
     if not personalize:
         analysis["blocked"] = True
         analysis["signals"], analysis["events"] = [], []
-        analysis["quality"]["warnings"].append("Consentement à la personnalisation absent, expiré ou désactivé.")
+        analysis["quality"]["warnings"].append("Personalisation consent is missing, expired or disabled.")
     return analysis, access, accounts, balances
 
 

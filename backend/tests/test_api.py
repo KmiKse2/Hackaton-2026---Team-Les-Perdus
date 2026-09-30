@@ -1,9 +1,3 @@
-import os
-import tempfile
-
-os.environ["DATABASE_URL"] = "sqlite:///" + tempfile.mktemp(prefix="lifeflow-tests-", suffix=".db")
-os.environ.pop("DEMO_API_TOKEN", None)
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -13,6 +7,7 @@ from backend.main import app
 
 @pytest.fixture
 def client():
+    assert "lifeflow-pytest-" in str(engine.url.database), "Refusing to reset a non-test database"
     Base.metadata.drop_all(engine)
     with TestClient(app) as client:
         yield client

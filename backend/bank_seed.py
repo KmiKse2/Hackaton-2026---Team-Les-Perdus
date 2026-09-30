@@ -34,9 +34,9 @@ def fixture(db, customer, include_scenario=False):
     latest = max((r.date for r in rows), default=date(2026, 8, 31))
     as_of = date(latest.year, latest.month, monthrange(latest.year, latest.month)[1])
     balance = customer.opening_balance + sum((r.amount for r in rows), Decimal(0))
-    current = {"resourceId": account_id, "iban": f"DEMO-CURRENT-{cid}", "currency": "EUR", "name": "Compte courant démo",
+    current = {"resourceId": account_id, "iban": f"DEMO-CURRENT-{cid}", "currency": "EUR", "name": "Demo current account",
                "ownerName": customer.name, "product": "current", "cashAccountType": "CACC", "status": "enabled", "usage": "PRIV"}
-    savings = dict(current, resourceId=savings_id, iban=f"DEMO-SAVINGS-{cid}", name="Épargne démo", product="savings", cashAccountType="SVGS")
+    savings = dict(current, resourceId=savings_id, iban=f"DEMO-SAVINGS-{cid}", name="Demo savings account", product="savings", cashAccountType="SVGS")
     def balances(amount):
         return [{"balanceAmount": {"amount": str(amount), "currency": "EUR"}, "balanceType": kind,
                  "referenceDate": as_of.isoformat(), "creditLimitIncluded": False,

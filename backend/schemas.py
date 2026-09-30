@@ -72,9 +72,9 @@ class AccountReport(WireModel):
     def validate_report(self):
         ids = [t.transactionId for t in self.booked + self.pending]
         if len(ids) != len(set(ids)):
-            raise ValueError("transactionId doit être unique dans booked et pending")
+            raise ValueError("transactionId must be unique across booked and pending")
         if any(t.bookingDate is None for t in self.booked):
-            raise ValueError("Une opération booked doit avoir une bookingDate")
+            raise ValueError("A booked transaction requires bookingDate")
         return self
 
 
@@ -100,20 +100,20 @@ class AccountImport(WireModel):
         if self.balanceHistory is not None:
             keys = [(b.balanceType, b.referenceDate) for b in self.balanceHistory]
             if len(set(keys)) != len(keys) or any(b.balanceAmount.currency != self.details.currency for b in self.balanceHistory):
-                raise ValueError("Historique de soldes dupliqué ou devise incohérente")
+                raise ValueError("Duplicate balance history or inconsistent currency")
         if self.balances is not None:
             if len({b.balanceType for b in self.balances}) != len(self.balances):
-                raise ValueError("Un seul snapshot par type de solde")
+                raise ValueError("Only one snapshot per balance type is allowed")
             if any(b.balanceAmount.currency != self.details.currency for b in self.balances):
-                raise ValueError("Devise du solde différente de celle du compte")
+                raise ValueError("Balance currency differs from account currency")
         if self.transactions is not None:
             if not self.historyFrom or not self.historyTo or self.historyFrom > self.historyTo:
-                raise ValueError("Un rapport complet exige historyFrom et historyTo cohérents")
+                raise ValueError("A complete report requires consistent historyFrom and historyTo")
             for tx in self.transactions.booked + self.transactions.pending:
                 if tx.transactionAmount.currency != self.details.currency:
-                    raise ValueError("Devise de l’opération différente de celle du compte")
+                    raise ValueError("Transaction currency differs from account currency")
             if any(not self.historyFrom <= t.bookingDate <= self.historyTo for t in self.transactions.booked):
-                raise ValueError("Opération hors de la période déclarée du rapport")
+                raise ValueError("Transaction outside the declared report period")
         return self
 
 
@@ -125,9 +125,9 @@ class BankingImport(WireModel):
     @model_validator(mode="after")
     def consistency(self):
         if len({a.details.resourceId for a in self.accounts}) != len(self.accounts):
-            raise ValueError("Compte dupliqué")
+            raise ValueError("Duplicate account")
         if any(a.historyTo and a.historyTo > self.asOf for a in self.accounts):
-            raise ValueError("historyTo doit être antérieur ou égal à asOf")
+            raise ValueError("historyTo must be on or before asOf")
         if any(b.referenceDate > self.asOf for a in self.accounts for b in (a.balances or []) + (a.balanceHistory or [])):
-            raise ValueError("Solde postérieur à asOf")
+            raise ValueError("Balance date is later than asOf")
         return self

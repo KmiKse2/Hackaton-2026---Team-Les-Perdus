@@ -10,14 +10,14 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictInt
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .bank_seed import bootstrap, fixture, legacy_payload, reset_demo
 from .database import Base, SessionLocal, engine, get_db
-from .models import Account, Balance, BankProfile, BankTransaction, CategoryFeedback, Consent, Customer, Insight, Transaction
+from .models import Account, Balance, BalanceObservation, BankProfile, BankTransaction, CategoryFeedback, ChatMessage, Consent, Customer, Insight, SimulationMonth, Transaction
 from .context_schemas import CategoryResponse, ContextImport, PersonalizationConsent
 from .schemas import AccountAccess, BankingImport
 from .seed import SCENARIOS, seed
@@ -26,6 +26,8 @@ from .services.context import bootstrap_context, update_context, update_personal
 from .services.catalog import METADATA, SIGNALS
 from .services.customer_state import STATE_LABELS, compute_catalog
 from .services.kate import handoff, personalize
+from .services.simulation import append_month
+from .services.solutions import chat_view, proposals, reply
 
 
 @asynccontextmanager
@@ -47,7 +49,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="LifeFlow · Customer Intelligence for Kate", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="LifeFlow · Customer Intelligence for Kate", version="0.4.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(","),
                    allow_methods=["GET", "POST"], allow_headers=["Content-Type", "X-Demo-Token"])
 
@@ -55,7 +57,7 @@ app.add_middleware(CORSMiddleware, allow_origins=os.getenv("CORS_ORIGINS", "http
 def authorize(x_demo_token: str = Header(default="")):
     expected = os.getenv("DEMO_API_TOKEN", "")
     if expected and not secrets.compare_digest(x_demo_token, expected):
-        raise HTTPException(401, "Jeton de démonstration invalide")
+        raise HTTPException(401, "Invalid demo token")
 
 
 protected = [Depends(authorize)]
@@ -65,7 +67,7 @@ def customer_or_404(db, customer_id, lock=False):
     query = select(Customer).where(Customer.id == customer_id)
     customer = db.scalar(query.with_for_update() if lock else query)
     if customer is None:
-        raise HTTPException(404, "Client introuvable")
+        raise HTTPException(404, "Customer not found")
     return customer
 
 
@@ -97,26 +99,35 @@ def snapshot(db, customer):
     profile = compute_catalog(db, customer.id, analysis, access, accounts, balances)
     kate = handoff(analysis, events)
     kate["customer_profile"] = profile
+    options = proposals(events, profile)
+    kate["solution_proposals"] = options
+    kate["schema_version"] = "2.0"
+    chat = chat_view(db, customer.id, profile, options)
+    timeline_allowed = {"accounts", "balances", "transactions"}.issubset(access["effective_permissions"]) and {f"demo-{customer.id}-current", f"demo-{customer.id}-savings"}.issubset(access["account_ids"])
+    timeline = [dict(row.summary, month=row.month) for row in db.scalars(select(SimulationMonth).where(SimulationMonth.customer_id == customer.id).order_by(SimulationMonth.month))] if timeline_allowed else []
+    if profile["blocked"]:
+        timeline = [dict(row, events=[], categories=[]) for row in timeline]
     return {"customer": {"id": customer.id, "name": customer.name, "persona": customer.persona,
                          "initials": customer.initials, "simulated": customer.simulated},
             "financial": analysis["financial"], "signals": analysis["signals"], "events": events,
             "transactions": analysis["transactions"], "analysis_date": analysis["as_of"],
             "consent": access, "data_quality": analysis["quality"],
             "accounts": [{**{k: a.details.get(k) for k in ("resourceId", "name", "currency", "cashAccountType", "status", "usage")},
+                          "name": {"Compte courant démo": "Demo current account", "Épargne démo": "Demo savings account"}.get(a.details.get("name"), a.details.get("name")),
                           "balances": [b.payload for b in balances if b.account_id == a.resource_id]} for a in accounts],
-            "customer_profile": profile, "kate_context": kate}
+            "customer_profile": profile, "kate_context": kate, "chat": chat, "simulation_timeline": timeline}
 
 
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
     db.execute(select(1))
-    return {"status": "ok", "mode": "synthetic-demo", "version": "0.3.0", "kate": "contract_only"}
+    return {"status": "ok", "mode": "synthetic-demo", "version": "0.4.0", "kate": "contract_only"}
 
 
 @app.get("/api/signal-catalog", dependencies=protected)
 def signal_catalog():
     return {"signals": [{"key": k, "label": v[0], "source": v[1]} for k, v in SIGNALS.items()],
-            "metadata": METADATA, "confidence_note": "Les confiances heuristiques ne sont pas des probabilités calibrées."}
+            "metadata": METADATA, "confidence_note": "Heuristic confidence scores are not calibrated probabilities."}
 
 
 @app.get("/api/customers/{customer_id}/profile", dependencies=protected)
@@ -155,10 +166,10 @@ def category_response(customer_id: int, category: str, payload: CategoryResponse
     customer = customer_or_404(db, customer_id, lock=True)
     state = snapshot(db, customer)
     if state["customer_profile"]["blocked"]:
-        raise HTTPException(403, "Personnalisation non autorisée")
+        raise HTTPException(403, "Personalisation is not authorised")
     current = next((c for c in state["customer_profile"]["categories"] if c["key"] == category), None)
     if category not in STATE_LABELS or not current or current["source"] not in {"inferred", "kate_confirmation"}:
-        raise HTTPException(422, "Seules les catégories déduites peuvent être confirmées ou refusées ici")
+        raise HTTPException(422, "Only inferred categories can be confirmed or dismissed here")
     save_category_response(db, customer_id, category, payload.status)
     event_type = {"moving": "MOVING", "travelling": "TRAVEL"}.get(category)
     if event_type:
@@ -223,7 +234,7 @@ def accounts(customer_id: int, db: Session = Depends(get_db)):
 def scoped_account(db, customer_id, account_id, permission):
     account = db.get(Account, account_id)
     if account is None or account.customer_id != customer_id:
-        raise HTTPException(404, "Compte introuvable pour ce client")
+        raise HTTPException(404, "Account not found for this customer")
     require_access(db, customer_id, [permission], [account_id])
     return account
 
@@ -250,17 +261,35 @@ def account_report(account_id: str, customer_id: int, db: Session = Depends(get_
 def consent_details(consent_id: str, customer_id: int, db: Session = Depends(get_db)):
     consent = db.get(Consent, customer_id)
     if consent is None or consent.consent_id != consent_id:
-        raise HTTPException(404, "Consentement introuvable pour ce client")
+        raise HTTPException(404, "Consent not found for this customer")
     return dict(consent.payload, consentStatus=access_for(db, customer_id)["status"])
 
 
+class SimulationRequest(BaseModel):
+    months: StrictInt = Field(ge=1, le=12)
+    expected_as_of: date
+
+
 @app.post("/api/customers/{customer_id}/simulate", dependencies=protected)
-def simulate(customer_id: int, db: Session = Depends(get_db)):
+def simulate(customer_id: int, payload: SimulationRequest | None = None, db: Session = Depends(get_db)):
     customer = customer_or_404(db, customer_id, lock=True)
     require_access(db, customer_id, ["accounts", "balances", "transactions"])
+    if payload is not None:
+        if db.get(BankProfile, customer_id).as_of != payload.expected_as_of:
+            raise HTTPException(409, "The analysis date has changed. Reload before simulating again.")
+        for _ in range(payload.months):
+            month = append_month(db, customer)
+            refresh_insights(db, customer_id)
+            state = snapshot(db, customer)
+            db.add(SimulationMonth(customer_id=customer_id, month=month, summary={
+                "financial": state["financial"], "events": [e["type"] for e in state["events"]],
+                "categories": [c["key"] for c in state["customer_profile"]["categories"] if c["status"] not in {"rejected", "expired"}]}))
+            db.flush()
+        db.commit()
+        return snapshot(db, customer)
     if not customer.simulated:
         if customer_id not in SCENARIOS:
-            raise HTTPException(404, "Aucun scénario de démonstration pour ce client")
+            raise HTTPException(404, "No demo scenario exists for this customer")
         # V1 rows remain a synthetic fixture archive, never the signal engine input.
         for index, (merchant, amount, category) in enumerate(SCENARIOS[customer_id]):
             reference = f"scenario-{index}"
@@ -280,6 +309,9 @@ def reset(customer_id: int, db: Session = Depends(get_db)):
     customer = customer_or_404(db, customer_id, lock=True)
     require_access(db, customer_id, ["accounts", "balances", "transactions"])
     reset_demo(db, customer)
+    db.execute(delete(BalanceObservation).where(BalanceObservation.account_id.in_([f"demo-{customer_id}-current", f"demo-{customer_id}-savings"]), BalanceObservation.reference_date > date(2026, 8, 31)))
+    db.execute(delete(SimulationMonth).where(SimulationMonth.customer_id == customer_id))
+    db.execute(delete(ChatMessage).where(ChatMessage.customer_id == customer_id))
     db.execute(delete(Insight).where(Insight.customer_id == customer_id))
     db.execute(delete(CategoryFeedback).where(CategoryFeedback.customer_id == customer_id))
     customer.simulated = False
@@ -292,6 +324,37 @@ class Feedback(BaseModel):
     status: Literal["confirmed", "dismissed"]
 
 
+class ChatRequest(BaseModel):
+    message: str = Field(default="", max_length=1000)
+    proposal_id: str | None = Field(default=None, max_length=80)
+
+
+@app.post("/api/customers/{customer_id}/chat", dependencies=protected)
+def chat_message(customer_id: int, payload: ChatRequest, db: Session = Depends(get_db)):
+    customer = customer_or_404(db, customer_id, lock=True)
+    state = snapshot(db, customer)
+    if state["chat"]["blocked"]:
+        raise HTTPException(403, "Personalization consent and bank access are required for this chat.")
+    options = state["chat"]["proposals"]
+    option = next((p for p in options if p["id"] == payload.proposal_id), None)
+    if payload.proposal_id and not option:
+        raise HTTPException(409, "This proposal is no longer available. Reload your current situation.")
+    message = payload.message.strip() or (option["title"] if option else "")
+    if not message:
+        raise HTTPException(422, "Enter a message or choose a proposal.")
+    proposal_id, answer = reply(message, payload.proposal_id, options)
+    if proposal_id is None and not payload.proposal_id and state["chat"]["messages"]:
+        previous_id = state["chat"]["messages"][-1]["proposal_id"]
+        previous = next((p for p in options if p["id"] == previous_id), None)
+        if previous:
+            proposal_id = previous_id
+            answer = "Your details have been saved in this demo conversation for " + previous["title"].lower() + ". A connected Kate service would check the details and return the available options before asking for your approval. No live quote, purchase or order has been made."
+    for role, text in (("user", message), ("assistant", answer)):
+        db.add(ChatMessage(customer_id=customer_id, role=role, text=text, proposal_id=proposal_id, as_of=date.fromisoformat(state["analysis_date"])))
+    db.commit()
+    return snapshot(db, customer)
+
+
 @app.post("/api/customers/{customer_id}/insights/{insight_id}/feedback", dependencies=protected)
 def feedback(customer_id: int, insight_id: int, payload: Feedback, db: Session = Depends(get_db)):
     customer = customer_or_404(db, customer_id, lock=True)
@@ -299,7 +362,7 @@ def feedback(customer_id: int, insight_id: int, payload: Feedback, db: Session =
     item = db.scalar(select(Insight).where(Insight.id == insight_id, Insight.customer_id == customer_id))
     active = {e["type"] for e in inspect(db, customer_id)[0]["events"]}
     if item is None or item.type not in active:
-        raise HTTPException(404, "Événement actif introuvable pour ce client")
+        raise HTTPException(404, "Active event not found for this customer")
     item.status = payload.status
     category = {"MOVING": "moving", "TRAVEL": "travelling"}.get(item.type)
     if category:
@@ -333,7 +396,7 @@ def add_transaction(payload: NewTransaction, db: Session = Depends(get_db)):
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(409, "Référence déjà utilisée pour ce client")
+        raise HTTPException(409, "Reference already in use for this customer")
     return snapshot(db, customer)
 
 
@@ -343,4 +406,4 @@ app.mount("/assets", StaticFiles(directory=dashboard), name="assets")
 
 @app.get("/", include_in_schema=False)
 def index():
-    return FileResponse(dashboard / "index.html")
+    return FileResponse(dashboard / "index.html", headers={"Cache-Control": "no-store"})

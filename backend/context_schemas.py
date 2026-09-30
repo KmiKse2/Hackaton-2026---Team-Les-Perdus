@@ -17,7 +17,7 @@ class Fact(WireModel, Generic[T]):
     @model_validator(mode="after")
     def dates(self):
         if self.valid_until and self.valid_until < self.observed_at:
-            raise ValueError("La validité doit suivre la date d’observation")
+            raise ValueError("Validity must follow the observation date")
         return self
 
 
@@ -36,16 +36,16 @@ class ProfileAttributes(WireModel):
     @model_validator(mode="after")
     def consistency(self):
         if self.date_of_birth and self.date_of_birth.value > self.date_of_birth.observed_at:
-            raise ValueError("Date de naissance postérieure à sa collecte")
+            raise ValueError("Date of birth is later than its collection date")
         if self.dependents_count and not 0 <= self.dependents_count.value <= 30:
-            raise ValueError("Nombre de personnes à charge invalide")
+            raise ValueError("Invalid number of dependants")
         if self.investment_risk_profile and not self.investment_risk_profile.valid_until:
-            raise ValueError("Un profil d’investissement exige une date de validité")
+            raise ValueError("Investment risk profile requires an expiry date")
         if self.monthly_income and self.monthly_income.value.amount < 0:
-            raise ValueError("Un revenu déclaré ne peut pas être négatif")
+            raise ValueError("Declared income cannot be negative")
         for field in (self.occupation,):
             if field and not 1 <= len(field.value) <= 120:
-                raise ValueError("Libellé de profil invalide")
+                raise ValueError("Invalid profile label")
         return self
 
 
@@ -60,7 +60,7 @@ class Product(WireModel):
     @model_validator(mode="after")
     def amounts(self):
         if self.monthly_repayment and self.monthly_repayment.amount < 0:
-            raise ValueError("Mensualité négative")
+            raise ValueError("Negative monthly repayment")
         return self
 
 
@@ -73,9 +73,9 @@ class ProductSnapshot(WireModel):
     @model_validator(mode="after")
     def validate_snapshot(self):
         if self.valid_until < self.observed_at or any(p.started_at > self.observed_at for p in self.items):
-            raise ValueError("Dates du snapshot produits incohérentes")
+            raise ValueError("Inconsistent product snapshot dates")
         if len({p.id for p in self.items}) != len(self.items):
-            raise ValueError("Produit dupliqué")
+            raise ValueError("Duplicate product")
         return self
 
 
@@ -103,10 +103,10 @@ class UsageSnapshot(WireModel):
     @model_validator(mode="after")
     def coverage(self):
         if self.from_date > self.to_date:
-            raise ValueError("Période inversée")
+            raise ValueError("Reversed date range")
         for rows in (self.sessions, self.kate_interactions):
             if any(not self.from_date <= r.date <= self.to_date for r in rows) or len({r.id for r in rows}) != len(rows):
-                raise ValueError("Journal dupliqué ou hors période")
+                raise ValueError("Duplicate or out-of-period log entry")
         return self
 
 

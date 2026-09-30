@@ -115,3 +115,22 @@ class CategoryFeedback(Base):
     status: Mapped[str] = mapped_column(String(20))
     observed_at: Mapped[DateValue] = mapped_column(Date)
     valid_until: Mapped[DateValue] = mapped_column(Date)
+
+
+class SimulationMonth(Base):
+    __tablename__ = "simulation_months"
+    __table_args__ = (UniqueConstraint("customer_id", "month"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    month: Mapped[str] = mapped_column(String(7))
+    summary: Mapped[dict] = mapped_column(JSON)
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    role: Mapped[str] = mapped_column(String(12))
+    text: Mapped[str] = mapped_column(String(3000))
+    proposal_id: Mapped[str | None] = mapped_column(String(80))
+    as_of: Mapped[DateValue] = mapped_column(Date)

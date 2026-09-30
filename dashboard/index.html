@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LifeFlow — Chaque vie a son rythme</title>
+  <link rel="stylesheet" href="/assets/style.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="Accueil LifeFlow"><span class="brand-icon">≈</span>LifeFlow<span class="brand-dot">.</span></a>
+    <div class="workspace-label">ESPACE DE DÉMONSTRATION</div>
+    <div class="nav-item active"><span>◈</span> Vue d’ensemble</div>
+    <div class="sidebar-note"><span class="small-circle"></span> Moteur de personnalisation<br><small>Signaux. Contexte. Attention.</small></div>
+    <div class="sidebar-bottom"><div class="team-avatar">LP</div><div>Les Perdus<small>Tectonic Hackathon · 2026</small></div></div>
+  </aside>
+  <main>
+    <header><div class="breadcrumb">Workspace <span>/</span> Life Engine</div><div class="demo-pill"><i></i> Données fictives</div></header>
+    <section class="heading"><div><div class="eyebrow">LA BANQUE AU RYTHME DE LA VIE</div><h1>Chaque signal raconte une histoire.</h1><p>Comprendre ce qui change. Être là au bon moment.</p></div><div class="version">PROTOTYPE <b>V.01</b></div></section>
+    <div id="error" class="error" role="alert" hidden></div>
+    <form id="token-form" class="token-form" hidden><label>Jeton de démonstration <input id="token" type="password" autocomplete="off" required></label><button class="primary">Se connecter</button></form>
+    <section class="toolbar"><div><span class="control-label">EXPLORER UN PARCOURS</span><div id="customers" class="customer-tabs" role="group" aria-label="Clients"></div></div><div class="simulation-controls"><button id="reset" class="secondary" disabled>↺ Réinitialiser</button><button id="simulate" class="primary" disabled>▶ Simuler septembre</button></div></section>
+    <div class="workspace">
+      <section class="customer-column"><div class="section-label"><span>01 / EXPÉRIENCE CLIENT</span><span class="live"><i></i> Synchronisée</span></div>
+        <div class="phone"><div class="phone-top"><b>9:41</b><span>••• ▰</span></div><div class="bank-header"><strong>KBC <span>× LifeFlow</span></strong><div class="avatar" id="phone-avatar">TH</div></div>
+          <div class="greeting">Un regard sur vos finances</div><h2 id="greeting">Bonjour Thomas <span>☀</span></h2>
+          <div class="balance-card"><div>Solde disponible <span>↗</span></div><strong id="balance">—</strong><small>Compte de démonstration · EUR</small><div class="card-decoration">≈</div></div>
+          <div class="phone-section-title">Pour vous <span class="personal-badge">PERSONNALISÉ</span></div>
+          <div id="personalization" aria-live="polite"></div>
+          <div class="phone-section-title">Dernières opérations <span id="period"></span></div><div id="transactions"></div>
+          <div class="phone-nav"><span class="selected">◈<small>Accueil</small></span><span>▤<small>Comptes</small></span><span>◎<small>Profil</small></span></div>
+        </div><p class="phone-caption">Aperçu web de la vue client · application Flutter dans /frontend</p>
+      </section>
+      <section class="engine-column"><div class="section-label"><span>02 / LIFE ENGINE</span><span id="engine-status">En attente de données</span></div>
+        <div class="engine-intro"><div class="engine-icon">✳</div><div><h2>Comprendre, puis accompagner.</h2><p>Des indices observables à une attention utile.</p></div><span class="outline-badge">EXPLICABLE</span></div>
+        <div class="stats"><div><span>Revenus du mois</span><strong id="income">—</strong><small id="month">Historique de démonstration</small></div><div><span>Dépenses du mois</span><strong id="expenses">—</strong><small>Transactions observées</small></div><div><span>Signaux actifs</span><strong id="signal-count">0 <em>signal</em></strong><small>Fenêtre glissante de 30 jours</small></div></div>
+        <article class="panel"><div class="panel-heading"><h3><span class="step">1</span> Signaux détectés</h3><span class="muted">OBSERVATION</span></div><div id="signals"></div></article>
+        <div class="connector">↓</div>
+        <article class="panel"><div class="panel-heading"><h3><span class="step">2</span> Ce qui pourrait changer</h3><span class="muted">INTERPRÉTATION</span></div><div id="events"></div><div class="score-note">ⓘ Le score reflète le poids des règles. Il ne s’agit pas d’une probabilité.</div></article>
+        <div class="trust-card"><span>◇</span><div><strong>La dernière parole appartient au client.</strong><p>Chaque hypothèse peut être confirmée ou refusée. Seuls des profils fictifs sont utilisés dans cette démonstration.</p></div></div>
+      </section>
+    </div><footer>LifeFlow · Les Perdus <span>Un prototype indépendant, sans affiliation officielle à KBC.</span></footer>
+  </main>
+  <dialog id="plan-dialog"><button id="close-dialog" class="dialog-close" aria-label="Fermer">×</button><div class="eyebrow">VOTRE PROCHAINE ÉTAPE</div><h2 id="plan-title"></h2><p id="plan-copy"></p><small>Une piste de réflexion pour cette démonstration.</small></dialog>
+</body>
+</html>

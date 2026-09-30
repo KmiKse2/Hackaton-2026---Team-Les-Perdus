@@ -22,9 +22,6 @@ services:
       DATABASE_URL: postgresql+psycopg://lifeflow:${POSTGRES_PASSWORD:-lifeflow-local-demo}@db:5432/lifeflow
       DEMO_API_TOKEN: ${DEMO_API_TOKEN:-}
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
-      GEMINI_ENABLED: ${GEMINI_ENABLED:-false}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
     depends_on:
       db:
         condition: service_healthy

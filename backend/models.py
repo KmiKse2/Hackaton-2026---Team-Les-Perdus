@@ -39,3 +39,48 @@ class Insight(Base):
     status: Mapped[str] = mapped_column(String(20), default="pending")
     evidence: Mapped[list] = mapped_column(JSON)
     personalization: Mapped[dict] = mapped_column(JSON)
+
+
+# Additive V2 tables: V1 transactions are preserved and imported once.
+class BankProfile(Base):
+    __tablename__ = "bank_profiles"
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), primary_key=True)
+    as_of: Mapped[DateValue] = mapped_column(Date)
+
+
+class Account(Base):
+    __tablename__ = "bank_accounts"
+    resource_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    details: Mapped[dict] = mapped_column(JSON)
+    history_from: Mapped[DateValue | None] = mapped_column(Date)
+    history_to: Mapped[DateValue | None] = mapped_column(Date)
+
+
+class Balance(Base):
+    __tablename__ = "bank_balances"
+    __table_args__ = (UniqueConstraint("account_id", "balance_type"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[str] = mapped_column(ForeignKey("bank_accounts.resource_id"), index=True)
+    balance_type: Mapped[str] = mapped_column(String(30))
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class BankTransaction(Base):
+    __tablename__ = "bank_transactions"
+    __table_args__ = (UniqueConstraint("account_id", "transaction_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[str] = mapped_column(ForeignKey("bank_accounts.resource_id"), index=True)
+    transaction_id: Mapped[str] = mapped_column(String(100))
+    booking_status: Mapped[str] = mapped_column(String(10))
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class Consent(Base):
+    __tablename__ = "bank_consents"
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), primary_key=True)
+    consent_id: Mapped[str] = mapped_column(String(100), unique=True)
+    payload: Mapped[dict] = mapped_column(JSON)
+    account_ids: Mapped[list] = mapped_column(JSON)
+    sync_day: Mapped[DateValue | None] = mapped_column(Date)
+    sync_count: Mapped[int] = mapped_column(default=0)

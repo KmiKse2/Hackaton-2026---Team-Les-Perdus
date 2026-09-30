@@ -1,30 +1,30 @@
-# LifeFlow · Les Perdus
+# LifeFlow · Signal Engine pour Kate
 
-Première version du PoC pour le challenge KBC : comprendre des signaux bancaires fictifs, repérer un changement possible et adapter l’accompagnement après confirmation du client.
+PoC du challenge KBC par **Les Perdus**. LifeFlow transforme les champs de comptes, soldes et transactions en **observations explicables**, puis prépare un contexte structuré pour Kate. Il n’utilise plus Gemini ni aucun LLM.
 
-## Lancer la démonstration
+**Le schéma fourni sert de contrat d’adaptation local. Ce dépôt n’est ni un connecteur KBC certifié ni une intégration à une API Kate.** Toutes les données de démonstration sont fictives ; aucun appel bancaire ou envoi à Kate n’est effectué.
 
-Sur ce poste, un Python portable a été préparé dans `.tools/` (ignoré par Git). Le démarrage local sans Docker est disponible via :
+## Lancer
+
+Sur le poste déjà préparé (Python portable dans `.tools/`, ignoré par Git) :
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/start-local.ps1
 ```
 
-Ce script utilise `.venv/` si disponible, sinon le Python portable, avec SQLite par défaut. Sur un autre poste, suivre l’une des installations ci-dessous.
-
-Avec **Docker Desktop démarré**, depuis la racine :
+Ou, avec Docker Desktop fonctionnel :
 
 ```powershell
 docker compose up --build -d
 ```
 
-- Tableau de bord et aperçu client : **http://localhost:8000**
-- Documentation interactive de l’API : **http://localhost:8000/docs**
-- État du service : **http://localhost:8000/health**
+- Tableau de bord : http://localhost:8000
+- Documentation des schémas et endpoints : http://localhost:8000/docs
+- Santé : http://localhost:8000/health
 
-PostgreSQL est créé automatiquement, avec un volume persistant. Les trois profils sont insérés au premier démarrage. Le service est exposé uniquement sur la machine locale. Arrêt : `docker compose down` (conserve les données).
+Docker utilise PostgreSQL avec un volume persistant ; le mode Python local utilise SQLite par défaut. La configuration reste dans `.env.example`. Aucune clé de modèle n’est nécessaire.
 
-### Sans Docker : Python 3.11 ou ultérieur
+Sur un nouveau poste (Python 3.11+) :
 
 ```powershell
 py -m venv .venv
@@ -32,11 +32,7 @@ py -m venv .venv
 .\.venv\Scripts\python.exe -m uvicorn backend.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-Sans variable `DATABASE_URL`, ce mode utilise **SQLite** (`lifeflow.db`) pour faciliter les essais. Docker utilise **PostgreSQL**. Pour une autre base, définir `DATABASE_URL` avant le lancement. Le backend se lance depuis la racine du dépôt.
-
-## Application Flutter
-
-Le tableau de bord inclut un aperçu HTML du téléphone. La véritable application Flutter est dans `frontend/` et appelle la même API. L’API doit être démarrée avant Flutter.
+Flutter web, dans un autre terminal :
 
 ```powershell
 cd frontend
@@ -44,116 +40,154 @@ flutter pub get
 flutter run -d chrome --web-port 5173 --dart-define=API_BASE_URL=http://localhost:8000
 ```
 
-Alternative si Chrome n’est pas installé : `flutter run -d web-server --web-port 5173`, puis ouvrir http://localhost:5173 dans un navigateur. Compilation : `flutter build web`.
+Sans Chrome : `flutter run -d web-server --web-port 5173`, puis ouvrir http://localhost:5173. Les cibles Android/iOS ne sont pas fournies ni validées ; Flutter web est la cible de démonstration.
 
-La cible **web** est fournie dans cette V1. Pour ajouter Android/iOS sur un poste équipé des SDK : `flutter create --platforms=android,ios .`. Sur un émulateur Android, utiliser `--dart-define=API_BASE_URL=http://10.0.2.2:8000` et configurer HTTP pour le développement. Les cibles natives et la distribution mobile ne sont pas validées dans cette version.
-
-## Parcours de démonstration
-
-1. Sélectionner **Thomas** : historique juillet–août, aucune hypothèse active.
-2. Cliquer **Simuler septembre** : premier salaire + trajet SNCB → premier emploi possible, score **80/100**.
-3. Consulter les indices dans le tableau de bord. Confirmer côté client, puis ouvrir **Préparer mon budget**.
-4. Passer à **Sophie** : loyer + mobilier + énergie → déménagement possible.
-5. Passer à **Marc** : avion + hébergement → voyage possible. Refuser la suggestion pour montrer le contrôle client.
-6. **Réinitialiser** restaure l’historique initial du client sélectionné et supprime ses événements et transactions ajoutées, y compris celles envoyées manuellement par l’API.
-
-Flutter et le tableau de bord relisent l’état toutes les cinq secondes. Les simulations sont idempotentes ; les réponses du client sont enregistrées en base.
-
-## Infrastructure
+## Ce qui change en V2
 
 ```text
-Flutter (vue client) ───────┐
-                          ├── REST JSON ── FastAPI ── PostgreSQL
-Dashboard HTML/CSS/JS ─────┘                   │
-                                  Signaux → événements → messages
-                                                         │
-                                                 Gemini optionnel
+Comptes + soldes + rapports booked/pending + consentement
+                         ↓
+Contrôle du périmètre et des permissions
+                         ↓
+Normalisation, exclusion des transferts propres et des comptes hors périmètre
+                         ↓
+Signaux : preuve, source, période, force de l’indice, limites
+                         ↓
+Hypothèses à confirmer + refus mémorisés
+                         ↓
+Contrat JSON pour un futur adaptateur Kate
 ```
 
-Le tableau de bord est servi par FastAPI, sans build Node supplémentaire. La logique métier reste entièrement en Python.
+Le moteur ne prend plus une catégorie de démonstration comme une vérité. Il lit les codes et champs bancaires. Les messages du téléphone sont des **aperçus locaux fixes** permettant de montrer le parcours, pas des réponses générées par Kate.
 
-```text
-backend/main.py             API, simulation, feedback, ingestion
-backend/database.py         SQLAlchemy, PostgreSQL / SQLite
-backend/models.py           clients, transactions, événements persistés
-backend/seed.py             profils et scénarios fictifs
-backend/services/engine.py  signaux, règles pondérées, soldes
-backend/services/gemini.py  messages Gemini avec repli local
-backend/tests/             tests fonctionnels API
-dashboard/                 tableau de bord responsive + aperçu client
-frontend/                  application Flutter web
-compose.yaml               API + PostgreSQL
-```
+### Données prises en charge
 
-Les signaux sont recalculés à partir des transactions ; les événements, leurs preuves, leur message et le feedback sont persistés. La fenêtre de détection couvre les 30 jours précédant la transaction la plus récente du client, et non l’horloge réelle : la démo reste rejouable. Les revenus et dépenses couvrent uniquement le dernier mois observé, potentiellement incomplet. Les montants sont stockés en décimal.
+| Bloc | Traitement |
+|---|---|
+| AccountDetails | `resourceId`, identifiants du compte, produit, titulaire, devise, type, statut, BIC et usage sont conservés. L’analyse personnelle porte sur les comptes `enabled` et `PRIV`. |
+| AccountBalance | Montant/devise, type, dates et présence éventuelle d’une limite de crédit sont conservés. Les types de soldes ne sont pas additionnés entre eux. |
+| AccountReport | Champs fournis conservés, rapports `booked` et `pending` distincts, unicité par compte + `transactionId`. |
+| AccountAccess | Statut, expiration, permissions, périmètre explicite des comptes et budget de synchronisation automatique. |
 
-Un score est une **somme de poids de règles**, pas une probabilité calibrée. Un premier salaire observé n’établit pas un premier emploi réel ; la confirmation du client est nécessaire. Le moteur n’affirme pas une récurrence après un seul paiement.
+Les champs optionnels restent absents lorsqu’ils ne sont pas fournis ; aucun âge, emploi, lien familial ou statut matrimonial n’est déduit du nom du titulaire. Les identifiants `DEMO-...` des exemples ne sont pas des IBAN réels.
 
-## Gemini / Vertex AI (optionnel)
+### Signaux actuels
 
-Sans configuration, les messages sont des modèles locaux : aucun appel cloud, aucune clé nécessaire. Pour Gemini Developer API, copier `.env.example` vers `.env`, renseigner `GEMINI_API_KEY` et `GEMINI_ENABLED=true`, puis relancer `docker compose up -d`. Le modèle est configurable via `GEMINI_MODEL`.
+| Signal | Preuve et règle | Limite |
+|---|---|---|
+| Nouveau salaire | Crédit `purposeCode=SALA`, absent de la période antérieure, au moins 60 jours d’historique déclaré complet | Nouveauté dans les données uniquement ; pas nécessairement un premier emploi |
+| Salaire récurrent | Deux crédits SALA, même émetteur identifié, intervalle de 25–35 jours, variation ≤20 % | Pas de garantie de revenu futur |
+| Nouveau loyer | Débit RENT nouveau dans l’historique couvert | Pas de déménagement déduit d’un seul loyer |
+| Hausse du loyer | Deux débits RENT mensuels au même destinataire, augmentation ≥15 % | Une hausse ne prouve pas un déménagement |
+| Prélèvement récurrent | Deux débits mensuels avec le même `mandateId` | Ne décrit pas la nature du contrat |
+| Nouvelle énergie | Débit avec code d’énergie, absent de l’historique couvert | Ne prouve pas un nouveau contrat |
+| Transport, mobilier, avion, hébergement | Correspondance textuelle sur contrepartie/communication | Indices faibles, jamais présentés comme une preuve structurée |
+| Compte d’épargne | `cashAccountType=SVGS` | Ne prouve pas une capacité d’épargne |
+| Solde comptabilisé négatif | Snapshot comptabilisé récent, sur compte courant | Ne suffit pas à conclure à une difficulté financière |
 
-Pour **Vertex AI en exécution Python locale**, configurer les identifiants Application Default Credentials, puis :
+Les règles et seuils sont des heuristiques de PoC, non calibrées statistiquement. Les sources, IDs des opérations, mesures et limites sont consultables en ouvrant un signal dans le tableau de bord. `bankTransactionCode`, les communications structurées et `endToEndId` sont conservés pour la traçabilité ; ils ne sont pas interprétés comme des catégories de dépense à eux seuls.
 
-```powershell
-$env:GEMINI_ENABLED="true"
-$env:GOOGLE_CLOUD_PROJECT="votre-projet"
-$env:GOOGLE_CLOUD_LOCATION="global"
-$env:GEMINI_MODEL="gemini-2.5-flash"
-```
+### Prévenir les faux signaux
 
-Le backend utilise le [SDK Google Gen AI](https://googleapis.github.io/python-genai/) et envoie seulement le type d’événement et les libellés des signaux. Le nom, les montants et les transactions brutes ne sont pas envoyés. Gemini rédige le titre et le message, pas les scores ni les actions. En cas d’échec, le message local prend le relais. L’intégration cloud nécessite un projet/modèle autorisé et n’est pas indispensable à la démo. Le fichier Compose ne monte pas d’identifiants Vertex ; un déploiement GCP devra fournir une identité de service.
+- Les opérations `pending` n’alimentent ni revenus/dépenses ni hypothèses. Leur nombre reste visible. Un passage `pending → booked` avec le même identifiant met à jour l’opération ; une rétrogradation est refusée.
+- Les virements vers/depuis les identifiants des comptes propres autorisés sont exclus des revenus, dépenses et signaux de vie. Un compte propre inconnu du périmètre ne peut pas être reconnu comme tel.
+- Les devises sont calculées séparément, sans conversion ni somme EUR + USD. La carte principale affiche EUR lorsqu’il est présent, sinon la première devise disponible.
+- Le disponible vient de `interimAvailable`. Il n’est jamais recalculé en ajoutant les transactions au snapshot. La présence ou l’absence d’information sur le découvert est affichée.
+- Le comptabilisé utilise le snapshot le plus récent parmi `interimBooked` et `closingBooked`, avec priorité à `interimBooked` à date égale. `expected` reste visible par compte, sans être assimilé au disponible.
+- Un solde vieux de plus de 7 jours par rapport à `asOf` est ignoré dans les agrégats et signalé. Sans snapshot exploitable, l’interface affiche **Indisponible**, pas zéro. Les agrégats portent uniquement sur les soldes renseignés, frais et autorisés.
+- Les hypothèses combinent des indices sur un **même compte**. Le système ne rapproche pas arbitrairement les activités de deux comptes.
 
-## API
+## Consentement et dates
+
+L’expiration du consentement est contrôlée par rapport à la **date UTC réelle** à chaque lecture et mutation. `validUntil` est fourni explicitement ; aucune durée réglementaire n’est présumée. Le consentement synthétique créé au premier démarrage dure 90 jours par choix de démonstration.
+
+Une permission supprimée masque aussi les données déjà stockées. Un consentement expiré/révoqué empêche les nouveaux imports, masque les comptes, soldes, transactions, signaux et hypothèses, et bloque le contexte Kate. Les données ne sont pas effacées automatiquement ; une politique de conservation réelle reste à définir. L’analyse nécessite `accounts` + `transactions` ; les soldes exigent aussi `balances`.
+
+`asOf` est une **date de rejeu explicite**, indépendante du consentement. La détection regarde les 30 derniers jours avant cette date. Les revenus et dépenses sont ceux du mois de cette date, hors mouvements internes. `historyFrom`/`historyTo` déclarent la couverture complète du rapport fourni ; moins de 60 jours ou une couverture n’atteignant pas `asOf` interdit de conclure à la nouveauté d’un paiement.
+
+Le mode `automatic=true` réserve atomiquement une unité de budget `frequencyPerDay` par import réussi. Un échec annule cette réservation. Les lectures du cache par Flutter/tableau de bord ne consomment rien. Un import manuel est distinct. Ce budget porte sur les **synchronisations locales** : le futur connecteur devra comptabiliser les véritables appels amont selon le contrat bancaire. Aucun ordonnanceur ni appel bancaire automatique n’est implémenté.
+
+## API et import
+
+Toutes les routes sont préfixées par `/api`. Les routes de comptes et de consentement requièrent `?customer_id=1` pour choisir le profil dans cette démo et vérifier la cohérence client/ressource.
 
 | Méthode | Chemin | Usage |
 |---|---|---|
-| GET | `/api/customers` | Profils fictifs |
-| GET | `/api/customers/{id}` | État complet client |
-| GET | `/api/customers/{id}/transactions` | Opérations |
-| GET | `/api/customers/{id}/insights` | Signaux et événements |
-| POST | `/api/customers/{id}/simulate` | Jouer septembre une fois |
-| POST | `/api/customers/{id}/reset` | Restaurer le client fictif |
-| POST | `/api/customers/{id}/insights/{event_id}/feedback` | `{"status":"confirmed"}` ou `dismissed` |
-| POST | `/api/transactions` | Ajouter une transaction et recalculer |
+| GET | `/accounts?customer_id=1` | Liste des comptes autorisés |
+| GET | `/accounts/{resourceId}?customer_id=1` | Détails d’un compte |
+| GET | `/accounts/{resourceId}/balances?customer_id=1` | Snapshots de solde |
+| GET | `/accounts/{resourceId}/transactions?customer_id=1` | Rapports booked/pending |
+| GET | `/consents/{consentId}?customer_id=1` | Métadonnées du consentement |
+| POST | `/customers/{id}/consent` | Modifier le consentement **de démonstration** |
+| POST | `/customers/{id}/banking` | Importer des snapshots bancaires |
+| GET | `/customers/{id}` | État du client et diagnostic des données |
+| GET | `/customers/{id}/insights` | Signaux et hypothèses |
+| GET | `/customers/{id}/kate-context` | Contrat d’entrée pour un futur adaptateur Kate |
+| POST | `/customers/{id}/simulate` | Jouer septembre |
+| POST | `/customers/{id}/reset` | Restaurer les deux comptes de démonstration |
+| POST | `/customers/{id}/insights/{event_id}/feedback` | Confirmer/refuser une hypothèse |
 
-Exemple d’ingestion :
-
-```json
-{
-  "customer_id": 1,
-  "date": "2026-09-01",
-  "merchant": "Employeur fictif",
-  "amount": "2650.00",
-  "category": "salary",
-  "reference": "user-salary-001"
-}
-```
-
-La référence doit commencer par `user-` et être unique par client ; un doublon retourne 409. Les catégories acceptées figurent dans `/docs`.
-
-## Vérification
+Exemple complet : [docs/banking-import.example.json](docs/banking-import.example.json).
 
 ```powershell
-docker compose exec api pytest backend/tests -q
-# Ou en Python local :
-.\.venv\Scripts\python.exe -m pytest backend/tests -q
+Invoke-RestMethod -Method Post -Uri 'http://localhost:8000/api/customers/1/banking' -ContentType 'application/json' -InFile 'docs/banking-import.example.json'
+```
 
+Un import doit référencer un consentement actif et des `accountResourceIds` autorisés. Il n’accorde pas de permissions à lui seul. Pour un nouveau compte fictif, ajouter son identifiant au consentement de démo avant l’import. Le rattachement d’un compte appartenant à un autre profil est refusé.
+
+Les blocs `balances` et `transactions` sont facultatifs : omission = conservation du bloc existant ; bloc fourni = **remplacement complet pour ce compte**. Fournir un rapport paginé incomplet comme un rapport complet supprimerait les opérations omises : le futur connecteur doit assembler toutes les pages avant l’import. `transactionId` est obligatoire, même pour pending ; sans identifiant stable fourni par la source, le connecteur devra définir sa politique de rapprochement. `endToEndId` et `mandateId` ne sont pas traités comme des clés uniques.
+
+Le corps est validé : devises cohérentes, dates couvertes, identifiants uniques, montants décimaux et types de soldes connus. Un import est transactionnel ; aucun changement partiel ne survit à un échec. Une date `asOf` antérieure à l’état courant est refusée, sauf via la réinitialisation explicite de la démo.
+
+L’ancien `POST /transactions` reste un **outil de compatibilité pour fabriquer des données fictives**, marqué déprécié dans OpenAPI. Il traduit les anciennes catégories en champs synthétiques et ne constitue pas un import bancaire réel.
+
+## Kate
+
+`backend/services/kate.py` définit un contrat JSON local : observations, force des indices, mesures, limites, hypothèses, confirmation nécessaire et refus mémorisés. Les noms, IBAN, mandats et communications brutes ne figurent pas dans ce contrat. Les références de comptes sont opaques.
+
+`integration=contract_only` et `sent_to_kate=false` sont explicites. Il faudra la documentation d’intégration fournie par KBC pour brancher un véritable adaptateur. Aucune URL, authentification ou capacité de Kate n’est inventée dans le projet.
+
+## Démonstration
+
+1. Thomas : simuler septembre → SALA + transport → changement professionnel possible (70/100).
+2. Sophie : RENT + mobilier + énergie → déménagement possible (75/100).
+3. Marc : avion + hébergement → voyage possible (60/100, indices textuels).
+4. Ouvrir les signaux, puis le contexte JSON préparé pour Kate.
+5. Refuser une hypothèse côté client ; elle disparaît des hypothèses à proposer à Kate.
+6. Révoquer le consentement de démo : les données sont masquées, y compris après actualisation. Le rétablir est une action explicite du présentateur.
+
+La réinitialisation restaure les deux comptes synthétiques du profil, supprime leurs opérations importées et réinitialise les hypothèses. Les autres comptes éventuellement importés sont conservés. Elle ne réaccorde jamais un consentement révoqué.
+
+## Structure et mise à niveau
+
+```text
+backend/schemas.py          DTO validés des champs bancaires fournis
+backend/models.py           tables V1 + comptes/soldes/rapports/consentements V2
+backend/bank_seed.py        exemples bancaires et import initial des données V1
+backend/services/banking.py consentement, persistance et import atomique
+backend/services/engine.py  normalisation, signaux et hypothèses
+backend/services/kate.py    contexte minimal pour Kate + messages d’aperçu local
+backend/main.py             API
+dashboard/                 vue moteur, preuves, consentement, aperçu client
+frontend/                  Flutter web
+```
+
+Le démarrage crée des **tables supplémentaires** et importe une fois les profils V1 vers le format bancaire, sans effacer les anciennes transactions. Les confirmations/refus existants sont conservés. Le bootstrap est idempotent. Ce mécanisme local ne remplace pas un outil de migrations pour une future production.
+
+## Vérification et limites
+
+```powershell
+.\.tools\python\python.exe -m pytest backend/tests -q
+# Ou : docker compose exec api pytest backend/tests -q
 cd frontend
 flutter analyze
 flutter build web
 ```
 
-Les tests vérifient les trois scénarios, la persistance du feedback, l’absence de doublons, la réinitialisation, l’expiration des événements, la validation des montants et la cohérence client/événement.
+La suite couvre les scénarios, la persistance du feedback, le consentement et ses permissions, les quotas, l’isolation des ressources, les virements propres, la récurrence, les soldes, les devises, la promotion pending/booked et l’atomicité des imports. Le runtime PostgreSQL reste à vérifier sur un moteur Docker fonctionnel ; SQLite est utilisé pour les tests locaux.
 
-Validation réalisée sur ce poste : **9 tests API réussis sur SQLite**, analyse Flutter sans erreur, compilation Flutter web réussie. Les trois scénarios, la confirmation, le refus, la persistance après actualisation et la réinitialisation ont été exercés dans Edge ; l’affichage du tableau de bord a été vérifié à 390 px et à 1440 px. Flutter compilé a été ouvert dans Edge et connecté à l’API. La configuration Compose est valide, mais l’exécution PostgreSQL n’a pas pu être vérifiée : le moteur Docker local renvoie une erreur de démarrage. Gemini n’a pas été appelé sans identifiants cloud.
+Vérification V2 réalisée : **33 tests backend réussis**, analyse Flutter sans erreur et compilation web réussie. Les trois scénarios, les preuves des signaux, les refus, la révocation/réactivation du consentement et l’affichage mobile ont été vérifiés dans Edge sur une base de test séparée. Le contrôle d’intégrité de la base locale après mise à niveau est correct et le nombre de transactions V1 est inchangé.
 
-## Périmètre de cette V1
-
-- Démonstration locale sur données synthétiques, sans connexion KBC ni mouvement d’argent réel.
-- Pas d’authentification bancaire : les profils sont volontairement accessibles au présentateur. Un jeton partagé facultatif `DEMO_API_TOKEN` protège l’API de démo. Le tableau de bord le demande à la connexion ; Flutter l’accepte via `--dart-define=DEMO_API_TOKEN=...`. Ce jeton embarqué ne remplace pas une authentification utilisateur.
-- Avant tout usage réel : authentification et autorisations par client, migrations de base, consentement, audit, gestion des secrets et traitement asynchrone. Aucun passage à l’échelle de millions de clients n’a été mesuré.
-- Les actions ouvrent des conseils de préparation généraux ; elles ne souscrivent pas de produit et ne créent pas de virement.
-- Aikido et le déploiement Google Cloud restent à réaliser avec les comptes de l’équipe. Ne jamais committer de clés ni de données bancaires réelles.
+Il n’y a pas d’authentification bancaire : le présentateur peut sélectionner et administrer tous les profils fictifs. `DEMO_API_TOKEN` protège facultativement l’API de démonstration ; ce jeton partagé ne remplace pas l’identité et l’autorisation par client d’un système réel. Une intégration réelle nécessitera notamment un connecteur authentifié, la vérification des consentements à la source, une politique de conservation et un audit. Aucun passage à l’échelle de millions de clients n’a été mesuré.
 
 Prototype indépendant, sans affiliation officielle à KBC.

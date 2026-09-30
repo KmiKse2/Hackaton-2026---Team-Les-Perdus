@@ -74,9 +74,10 @@ class _CustomerScreenState extends State<CustomerScreen> {
                 headers: headers, body: body == null ? null : jsonEncode(body)))
         .timeout(const Duration(seconds: 30));
     if (response.statusCode >= 400) {
-      if (response.statusCode == 401)
+      if (response.statusCode == 401) {
         throw Exception(
             'Jeton de démonstration requis. Configurez DEMO_API_TOKEN.');
+      }
       throw Exception(
           'Le serveur ne peut pas traiter cette demande (${response.statusCode}).');
     }
@@ -94,18 +95,20 @@ class _CustomerScreenState extends State<CustomerScreen> {
       if (initial) _customers = await _request('/customers') as List<dynamic>;
       final id = customerId ?? _selected;
       final result = await _request('/customers/$id') as Map<String, dynamic>;
-      if (mounted)
+      if (mounted) {
         setState(() {
           _state = result;
           _selected = id;
           _error = null;
         });
+      }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _error =
               'Connexion impossible. Vérifiez l’API ($baseUrl) et le jeton de démonstration.';
         });
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -122,16 +125,18 @@ class _CustomerScreenState extends State<CustomerScreen> {
           post: 'POST', body: body) as Map<String, dynamic>;
       if (mounted) setState(() => _state = result);
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() => _error =
             'Action impossible. Vérifiez la connexion puis réessayez.');
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
-  String _money(dynamic value) =>
-      '${double.parse(value.toString()).toStringAsFixed(2).replaceAll('.', ',')} €';
+  String _money(dynamic value, [String currency = 'EUR']) => value == null
+      ? 'Indisponible'
+      : '${double.parse(value.toString()).toStringAsFixed(2).replaceAll('.', ',')} ${currency == 'EUR' ? '€' : currency}';
 
   Widget _insight(Map<String, dynamic> event) {
     final copy = event['personalization'] as Map<String, dynamic>;
@@ -208,6 +213,14 @@ class _CustomerScreenState extends State<CustomerScreen> {
         .where((e) => e['status'] != 'dismissed')
         .toList();
     final transactions = _state?['transactions'] as List<dynamic>? ?? [];
+    final access = _state?['consent'] as Map<String, dynamic>?;
+    final permissions =
+        access?['effective_permissions'] as List<dynamic>? ?? [];
+    final canSimulate =
+        ['accounts', 'balances', 'transactions'].every(permissions.contains);
+    final suspended = _state?['kate_context']?['status'] == 'blocked';
+    final currency = financial?['currency'] as String? ?? 'EUR';
+    final accounts = _state?['accounts'] as List<dynamic>? ?? [];
     return Scaffold(
       appBar: AppBar(
           title: const Text('LifeFlow.',
@@ -268,24 +281,64 @@ class _CustomerScreenState extends State<CustomerScreen> {
                         child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Solde disponible',
+                              const Text('Disponible observé',
                                   style: TextStyle(color: Colors.white70)),
                               const SizedBox(height: 12),
-                              Text(_money(financial['balance']),
+                              Text(_money(financial['balance'], currency),
                                   style: const TextStyle(
                                       fontSize: 36,
                                       fontWeight: FontWeight.w700,
                                       color: Colors.white)),
                               const SizedBox(height: 16),
-                              const Text('Compte de démonstration · EUR',
-                                  style: TextStyle(
+                              Text(
+                                  'Soldes bancaires · $currency · ${_state?['analysis_date']}',
+                                  style: const TextStyle(
                                       fontSize: 11, color: Colors.white70)),
                             ])),
+                    if (financial['credit_limit_included'] == true ||
+                        financial['credit_limit_unknown'] == true)
+                      Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: Text(
+                            financial['credit_limit_included'] == true
+                                ? 'Le disponible inclut une limite de crédit. Il ne représente pas uniquement vos fonds propres.'
+                                : 'L’inclusion éventuelle d’une limite de crédit n’est pas renseignée.',
+                            style: const TextStyle(
+                                fontSize: 12, color: Color(0xFF866630)),
+                          )),
+                    const SizedBox(height: 12),
+                    Text(
+                        'Solde comptabilisé : ${_money(financial['booked_balance'], currency)}',
+                        style: const TextStyle(
+                            fontSize: 12, color: Colors.blueGrey)),
+                    if (accounts.isNotEmpty)
+                      Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: Wrap(
+                              spacing: 6,
+                              children: accounts
+                                  .map((dynamic a) => Chip(
+                                        label: Text(
+                                            '${a['name'] ?? 'Compte'} · ${a['currency']}',
+                                            style:
+                                                const TextStyle(fontSize: 10)),
+                                      ))
+                                  .toList())),
+                    if (suspended)
+                      Container(
+                          margin: const EdgeInsets.only(top: 16),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                              color: const Color(0xFFFFF4DF),
+                              borderRadius: BorderRadius.circular(12)),
+                          child: const Text(
+                              'L’accès aux données est suspendu. Les suggestions restent masquées tant que le consentement nécessaire n’est pas actif.',
+                              style: TextStyle(fontSize: 12, height: 1.6))),
                     const SizedBox(height: 26),
                     Text('Pour vous',
                         style: Theme.of(context).textTheme.titleLarge),
                     const SizedBox(height: 14),
-                    if (events.isEmpty)
+                    if (events.isEmpty && !suspended)
                       Container(
                           padding: const EdgeInsets.all(20),
                           margin: const EdgeInsets.only(bottom: 12),
@@ -325,7 +378,9 @@ class _CustomerScreenState extends State<CustomerScreen> {
                               style: const TextStyle(fontSize: 13)),
                           subtitle: Text(t['date'] as String,
                               style: const TextStyle(fontSize: 10)),
-                          trailing: Text(_money(t['amount']),
+                          trailing: Text(
+                              _money(t['amount'],
+                                  t['currency'] as String? ?? 'EUR'),
                               style: TextStyle(
                                   fontWeight: FontWeight.w600,
                                   color:
@@ -342,7 +397,9 @@ class _CustomerScreenState extends State<CustomerScreen> {
                     const SizedBox(height: 12),
                     Wrap(spacing: 8, runSpacing: 8, children: [
                       FilledButton.icon(
-                          onPressed: _busy || customer['simulated'] == true
+                          onPressed: _busy ||
+                                  !canSimulate ||
+                                  customer['simulated'] == true
                               ? null
                               : () => _mutate('simulate'),
                           icon: const Icon(Icons.play_arrow),
@@ -350,12 +407,14 @@ class _CustomerScreenState extends State<CustomerScreen> {
                               ? 'Septembre simulé'
                               : 'Simuler septembre')),
                       OutlinedButton(
-                          onPressed: _busy ? null : () => _mutate('reset'),
+                          onPressed: _busy || !canSimulate
+                              ? null
+                              : () => _mutate('reset'),
                           child: const Text('Réinitialiser')),
                     ]),
                     const SizedBox(height: 24),
                     const Text(
-                        'Profils fictifs · Prototype Les Perdus\nSans affiliation officielle à KBC.',
+                        'Profils fictifs · Aperçu local pour Kate\nAucun appel à Kate. Sans affiliation officielle à KBC.',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                             fontSize: 10, color: Colors.blueGrey, height: 1.7)),

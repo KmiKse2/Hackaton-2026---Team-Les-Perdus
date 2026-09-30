@@ -1,0 +1,130 @@
+"""Persistence, scoped consent checks and import of complete bank snapshots."""
+from datetime import date, datetime, timezone
+
+from fastapi import HTTPException
+from sqlalchemy import case, delete, or_, select, update
+
+from ..models import Account, Balance, BankProfile, BankTransaction, Consent
+from ..schemas import AccountAccess, BankingImport
+from .engine import analyze
+
+
+def today():
+    return datetime.now(timezone.utc).date()
+
+
+def access_for(db, customer_id):
+    consent = db.get(Consent, customer_id)
+    if consent is None:
+        return {"status": "missing", "effective_permissions": [], "account_ids": [], "automatic_syncs_remaining": 0}
+    data = consent.payload
+    valid = data["consentStatus"] == "valid" and date.fromisoformat(data["validUntil"]) >= today()
+    used = consent.sync_count if consent.sync_day == today() else 0
+    return {"consent_id": consent.consent_id, "status": data["consentStatus"] if valid or data["consentStatus"] != "valid" else "expired",
+            "valid_until": data["validUntil"], "permissions": data["permissions"],
+            "effective_permissions": data["permissions"] if valid else [], "account_ids": consent.account_ids if valid else [],
+            "frequency_per_day": data["frequencyPerDay"], "automatic_syncs_remaining": max(0, data["frequencyPerDay"] - used) if valid else 0}
+
+
+def require_access(db, customer_id, permissions, account_ids=()):
+    access = access_for(db, customer_id)
+    if not set(permissions).issubset(access["effective_permissions"]) or not set(account_ids).issubset(access["account_ids"]):
+        raise HTTPException(403, "Consentement invalide, permission absente ou compte hors du périmètre autorisé")
+    return access
+
+
+def set_consent(db, customer_id, payload: AccountAccess):
+    # This is a local demo-management endpoint, NOT a real bank consent grant.
+    for resource_id in payload.accountResourceIds:
+        account = db.get(Account, resource_id)
+        if account and account.customer_id != customer_id:
+            raise HTTPException(403, "Compte rattaché à un autre client")
+    other = db.scalar(select(Consent).where(Consent.consent_id == payload.consentId, Consent.customer_id != customer_id))
+    if other:
+        raise HTTPException(409, "Identifiant de consentement déjà utilisé")
+    consent = db.get(Consent, customer_id)
+    if consent is None:
+        consent = Consent(customer_id=customer_id, consent_id=payload.consentId, sync_count=0)
+        db.add(consent)
+    consent.consent_id = payload.consentId
+    consent.payload = payload.model_dump(mode="json")
+    consent.account_ids = list(dict.fromkeys(payload.accountResourceIds))
+    db.flush()
+
+
+def store_import(db, customer_id, payload: BankingImport, automatic=False):
+    required = {"accounts"}
+    if any(a.balances is not None for a in payload.accounts):
+        required.add("balances")
+    if any(a.transactions is not None for a in payload.accounts):
+        required.add("transactions")
+    access = require_access(db, customer_id, required, [a.details.resourceId for a in payload.accounts])
+    consent = db.get(Consent, customer_id)
+    if consent.consent_id != payload.consentId:
+        raise HTTPException(403, "Le consentement ne correspond pas au client")
+    if automatic:
+        if access["automatic_syncs_remaining"] < 1:
+            raise HTTPException(429, "Budget quotidien de synchronisation automatique épuisé")
+        day = today()
+        result = db.execute(update(Consent).where(
+            Consent.customer_id == customer_id,
+            or_(Consent.sync_day.is_(None), Consent.sync_day != day,
+                Consent.sync_count < consent.payload["frequencyPerDay"]),
+        ).values(sync_day=day, sync_count=case((Consent.sync_day == day, Consent.sync_count + 1), else_=1)))
+        if result.rowcount != 1:
+            raise HTTPException(429, "Budget quotidien de synchronisation automatique épuisé")
+    profile = db.get(BankProfile, customer_id)
+    if profile is None:
+        profile = BankProfile(customer_id=customer_id, as_of=payload.asOf)
+        db.add(profile)
+    elif payload.asOf < profile.as_of:
+        raise HTTPException(409, "Snapshot antérieur à la date d’analyse actuelle")
+    profile.as_of = payload.asOf
+    for item in payload.accounts:
+        resource_id = item.details.resourceId
+        account = db.get(Account, resource_id)
+        if account and account.customer_id != customer_id:
+            raise HTTPException(403, "Compte rattaché à un autre client")
+        if account is None:
+            account = Account(resource_id=resource_id, customer_id=customer_id)
+            db.add(account)
+        elif account.details["currency"] != item.details.currency and (item.balances is None or item.transactions is None):
+            raise HTTPException(422, "Changer la devise exige de remplacer soldes et transactions ensemble")
+        account.details = item.details.model_dump(mode="json", exclude_none=True)
+        if item.transactions is not None:
+            account.history_from, account.history_to = item.historyFrom, item.historyTo
+        db.flush()
+        if item.balances is not None:
+            db.execute(delete(Balance).where(Balance.account_id == resource_id))
+            for balance in item.balances:
+                db.add(Balance(account_id=resource_id, balance_type=balance.balanceType, payload=balance.model_dump(mode="json", exclude_none=True)))
+        if item.transactions is not None:
+            existing = {t.transaction_id: t for t in db.scalars(select(BankTransaction).where(BankTransaction.account_id == resource_id))}
+            keep = set()
+            for status in ("booked", "pending"):
+                for tx in getattr(item.transactions, status):
+                    keep.add(tx.transactionId)
+                    row = existing.get(tx.transactionId)
+                    # Never demote a posted transaction when an upstream snapshot is delayed.
+                    if row is not None and row.booking_status == "booked" and status == "pending":
+                        raise HTTPException(409, "Une opération comptabilisée ne peut pas redevenir pending")
+                    if row is None:
+                        row = BankTransaction(account_id=resource_id, transaction_id=tx.transactionId)
+                        db.add(row)
+                    row.booking_status, row.payload = status, tx.model_dump(mode="json", exclude_none=True)
+            for key, row in existing.items():
+                if key not in keep:
+                    db.delete(row)
+    db.flush()
+
+
+def inspect(db, customer_id):
+    access = access_for(db, customer_id)
+    # Permission and scope are applied before loading raw financial payloads.
+    accounts = list(db.scalars(select(Account).where(Account.customer_id == customer_id, Account.resource_id.in_(access["account_ids"])))) if "accounts" in access["effective_permissions"] else []
+    ids = [a.resource_id for a in accounts]
+    balances = list(db.scalars(select(Balance).where(Balance.account_id.in_(ids)))) if "balances" in access["effective_permissions"] else []
+    transactions = list(db.scalars(select(BankTransaction).where(BankTransaction.account_id.in_(ids)))) if "transactions" in access["effective_permissions"] else []
+    profile = db.get(BankProfile, customer_id)
+    analysis = analyze(accounts, balances, transactions, access, profile.as_of if profile else today())
+    return analysis, access, accounts, balances

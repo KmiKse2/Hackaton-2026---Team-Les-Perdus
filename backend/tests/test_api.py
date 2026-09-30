@@ -2,7 +2,6 @@ import os
 import tempfile
 
 os.environ["DATABASE_URL"] = "sqlite:///" + tempfile.mktemp(prefix="lifeflow-tests-", suffix=".db")
-os.environ["GEMINI_ENABLED"] = "false"
 os.environ.pop("DEMO_API_TOKEN", None)
 
 import pytest
@@ -19,7 +18,7 @@ def client():
         yield client
 
 
-@pytest.mark.parametrize("customer_id,kind,score", [(1, "FIRST_JOB", 80), (2, "MOVING", 80), (3, "TRAVEL", 80)])
+@pytest.mark.parametrize("customer_id,kind,score", [(1, "FIRST_JOB", 70), (2, "MOVING", 75), (3, "TRAVEL", 60)])
 def test_scenario_and_reset(client, customer_id, kind, score):
     before = client.get(f"/api/customers/{customer_id}").json()
     assert before["events"] == []
@@ -28,7 +27,7 @@ def test_scenario_and_reset(client, customer_id, kind, score):
     after = response.json()
     assert after["events"][0]["type"] == kind
     assert after["events"][0]["score"] == score
-    assert after["events"][0]["personalization"]["source"] == "template"
+    assert after["events"][0]["personalization"]["source"] == "local_preview_for_kate"
     # Replaying the simulation does not create transactions or events twice.
     assert client.post(f"/api/customers/{customer_id}/simulate").json() == after
     assert client.get(f"/api/customers/{customer_id}").json() == after
@@ -55,7 +54,7 @@ def transaction(**overrides):
 def test_ingestion_validation_and_deduplication(client):
     result = client.post("/api/transactions", json=transaction())
     assert result.status_code == 201
-    assert result.json()["events"][0]["score"] == 60
+    assert result.json()["events"] == []  # A single salary no longer implies a job change.
     assert client.post("/api/transactions", json=transaction()).status_code == 409
     assert client.post("/api/transactions", json=transaction(amount="1.001", reference="user-invalid")).status_code == 422
     assert client.post("/api/transactions", json=transaction(category="unknown")).status_code == 422

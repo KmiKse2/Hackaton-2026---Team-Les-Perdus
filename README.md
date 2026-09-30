@@ -50,6 +50,12 @@ The dashboard and Flutter interface now use English. Select **1, 3, 6 or 12 mont
 
 See [simulation and chat documentation](docs/simulation-and-chat.md) for scenarios, APIs, reset behaviour and integration limits.
 
+V4 checks: **68 backend tests passed**, Flutter analysis and web build passed, and Edge verified simulations, chat persistence, dismissal, mobile layout and Flutter chat. Tests select an isolated temporary database before importing the application and refuse to reset any non-test database.
+
+Docker V4 startup was also verified with PostgreSQL 16: API health is OK and both services run successfully. The 31 restored demo transactions were copied into the previously empty PostgreSQL database; SQLite remains available separately. Background polling and an outdated API response were checked to ensure controls do not get stuck in the processing state.
+
+If the dashboard reports an older API, restart the server and refresh the page. Background refresh no longer disables the controls; failed requests release the processing state. For a Docker `Internal Server Error`, first check `docker info`: on this workstation the cause was a broken Docker Desktop connection to its Linux engine (`no route to host`), resolved by restarting Docker Desktop and its `docker-desktop` WSL distribution. Use `docker context use desktop-linux`. Stop the local Python server before binding Docker to the same port 8000. Docker uses its own PostgreSQL volume; the local SQLite database remains a separate file.
+
 Les **40 signaux du catalogue fourni** sont maintenant pris en charge, avec source, confiance, date, statut et disponibilité. Les profils distinguent les faits déclarés/KYC (âge, emploi, situation familiale) des catégories inférées à confirmer. Le consentement à la personnalisation est distinct de l’accès bancaire.
 
 Le tableau de bord permet de modifier les profils fictifs et de consulter le catalogue ; Flutter affiche les catégories. Les sources absentes restent inconnues. Voir les [règles, sources et nouvelles routes](docs/customer-signals.md) et le [catalogue original](docs/kbc_lifeflow_signal_catalog.txt).

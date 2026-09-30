@@ -32,7 +32,7 @@ def classify(payload):
     return "other", "unclassified", "unknown"
 
 
-def analyze(accounts, balances, transactions, access, as_of):
+def analyze(accounts, balances, transactions, access, as_of, personalization=True):
     permissions = set(access["effective_permissions"])
     blocked = not {"accounts", "transactions"}.issubset(permissions)
     scoped = [a for a in accounts if a.resource_id in access["account_ids"]] if "accounts" in permissions else []
@@ -86,7 +86,7 @@ def analyze(accounts, balances, transactions, access, as_of):
         signals.append(signal)
         return signal
 
-    for account in eligible.values() if not blocked else []:
+    for account in eligible.values() if not blocked and personalization else []:
         if account.details.get("cashAccountType") == "SVGS":
             emit(account, "savings_account", "Compte d’épargne présent", [], fields=["cashAccountType"],
                  limitations=["La présence d’un compte ne prouve pas une capacité d’épargne."])
@@ -181,7 +181,7 @@ def analyze(accounts, balances, transactions, access, as_of):
                 amount = Decimal(booked.payload["balanceAmount"]["amount"])
                 group["booked"] += amount
                 group["has_booked"] = True
-                if not blocked and account.details.get("cashAccountType") == "CACC" and amount < 0:
+                if not blocked and personalization and account.details.get("cashAccountType") == "CACC" and amount < 0:
                     emit(account, "negative_booked_balance", "Solde comptabilisé négatif", [], metrics={"amount": str(amount)},
                          fields=["balanceType", "balanceAmount", "referenceDate"],
                          limitations=["Un solde négatif isolé ne suffit pas à conclure à une difficulté financière."])

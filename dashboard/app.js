@@ -24,6 +24,8 @@ function buttons() {
   $('simulate').textContent = busy ? 'Traitement en cours…' : state?.customer.simulated ? '✓ Septembre simulé' : '▶ Simuler septembre';
   $('reset').disabled = busy || !canSimulate;
   $('consent-toggle').disabled = busy || !state;
+  $('personalization-toggle').disabled = busy || !state;
+  $('profile-save').disabled = busy || !state;
   document.querySelectorAll('.customer-tab, .confirmation button, .action-button').forEach((button) => { button.disabled = busy; });
 }
 
@@ -54,6 +56,7 @@ function render() {
   $('engine-status').textContent = `Analyse au ${state.analysis_date}`;
   $('signals').innerHTML = signals.length ? signals.map((s) => `<details class="signal-detail"><summary><span class="signal-check">${s.strength === 'strong' ? '✓' : '~'}</span><span>${escapeHtml(s.label)}</span><small>${s.strength === 'strong' ? 'STRUCTURÉ' : 'INDICE TEXTUEL'}</small></summary><div class="signal-proof"><p>Compte : ${escapeHtml(s.account_id)}</p><p>Champs : ${s.source_fields.map(escapeHtml).join(', ')}</p><p>Opérations : ${s.transaction_ids.length ? s.transaction_ids.map(escapeHtml).join(', ') : 'Contexte du compte ou du solde'}</p><p>${Object.entries(s.metrics).map(([key, value]) => `${escapeHtml(key)} : ${escapeHtml(value)}`).join(' · ')}</p>${s.limitations.map((l) => `<p>Limite : ${escapeHtml(l)}</p>`).join('')}</div></details>`).join('') : `<div class="empty-state"><strong>${state.kate_context.status === 'blocked' ? 'Analyse suspendue.' : 'Aucun signal exploitable.'}</strong>Les permissions et la qualité des données déterminent ce qui peut être observé.</div>`;
   renderBanking();
+  renderProfile();
   const statuses = { pending: 'À confirmer par le client', confirmed: 'Confirmé par le client', dismissed: 'Refusé par le client' };
   $('events').innerHTML = events.length ? events.map((e) => `<div class="event"><div class="event-title"><span>${symbols[e.type] || '◇'} ${escapeHtml(e.personalization.label)}</span><b>${e.score}/100</b></div><div class="progress"><span style="width:${e.score}%"></span></div><div class="event-meta"><span>${statuses[e.status]}</span><span>${e.evidence.length} indices</span></div><details><summary>Pourquoi cette hypothèse ?</summary><ul>${e.evidence.map((v) => `<li>${escapeHtml(v.label)} · +${v.weight} points</li>`).join('')}</ul></details></div>`).join('') : '<div class="empty-state"><strong>Aucun changement détecté.</strong>L’expérience reste discrète tant que les indices sont insuffisants.</div>';
   const active = events.filter((e) => e.status !== 'dismissed');
@@ -75,6 +78,26 @@ function renderBanking() {
   $('kate-context').textContent = JSON.stringify(kate, null, 2);
 }
 
+const profileLabels = { student: 'Étudiant', employed: 'Salarié', self_employed: 'Indépendant', unemployed: 'Sans emploi', retired: 'Retraité', single: 'Célibataire', married: 'Marié', cohabiting: 'Cohabitant', divorced: 'Divorcé', under_18: 'Moins de 18 ans', '66+': '66 ans et plus', unknown: 'Inconnu' };
+const statusLabels = { inferred: 'Hypothèse', confirmed: 'Confirmé / déclaré', rejected: 'Refusé', expired: 'Expiré', observed: 'Observé', unknown: 'Inconnu' };
+function renderProfile() {
+  const profile = state.customer_profile;
+  const signals = profile.signals;
+  $('profile-status').textContent = profile.blocked ? 'SUSPENDU' : profile.synthetic ? 'PROFIL FICTIF' : 'PROFIL FOURNI';
+  $('profile-categories').innerHTML = profile.categories.length ? profile.categories.map((c) => `<div class="profile-category ${c.status}"><strong>${escapeHtml(c.value === true ? c.label : `${c.label} : ${profileLabels[c.value] || c.value}`)}</strong><small>${statusLabels[c.status]} · ${escapeHtml(c.source)} · ${escapeHtml(c.timestamp)}${c.confidence != null && c.status === 'inferred' ? ` · score ${Math.round(c.confidence * 100)}/100` : ''}</small>${c.source === 'inferred' ? `<div class="category-feedback"><button class="secondary" data-category="${escapeHtml(c.key)}" data-response="confirmed">Confirmer</button><button class="secondary" data-category="${escapeHtml(c.key)}" data-response="rejected">Refuser</button></div>` : ''}</div>`).join('') : '<p>Aucune catégorie exploitable. Vérifiez les sources et les consentements.</p>';
+  $('profile-note').textContent = 'L’âge et la situation familiale proviennent du profil fourni. Les catégories déduites restent des hypothèses ; les scores ne sont pas des probabilités calibrées.';
+  const enabled = signals.personalization_consent.value === true;
+  $('personalization-toggle').textContent = enabled ? 'Désactiver la personnalisation' : 'Autoriser la personnalisation démo';
+  const available = Object.values(signals).filter((s) => s.availability === 'available').length;
+  $('catalog-summary').textContent = `Catalogue : ${available} / ${Object.keys(signals).length} signaux disponibles · 4 métadonnées par signal`;
+  $('catalog-signals').innerHTML = Object.entries(signals).map(([key, s]) => `<details class="catalog-row"><summary><span>${escapeHtml(s.label)}</span><small>${escapeHtml(s.availability)} · ${statusLabels[s.status] || s.status}</small></summary><pre>${escapeHtml(JSON.stringify({ signal: key, ...s }, null, 2))}</pre></details>`).join('');
+  if (!$('profile-form').contains(document.activeElement)) {
+    $('profile-employment').value = signals.employment_status.value || 'unknown';
+    $('profile-household').value = signals.household_status.value || 'unknown';
+    $('profile-dependents').value = signals.dependents_count.value ?? '';
+  }
+}
+
 async function load() {
   customers = await api('/customers');
   state = await api(`/customers/${selected}`);
@@ -83,7 +106,7 @@ async function load() {
 }
 $('customers').addEventListener('click', (event) => {
   const button = event.target.closest('[data-customer]');
-  if (button) perform(async () => { const id = Number(button.dataset.customer); const next = await api(`/customers/${id}`); selected = id; state = next; render(); });
+  if (button) perform(async () => { const id = Number(button.dataset.customer); const next = await api(`/customers/${id}`); selected = id; state = next; $('profile-birth').value = ''; render(); });
 });
 $('simulate').addEventListener('click', () => perform(async () => { state = await api(`/customers/${selected}/simulate`, 'POST'); render(); }));
 $('reset').addEventListener('click', () => perform(async () => { state = await api(`/customers/${selected}/reset`, 'POST'); render(); }));
@@ -94,6 +117,26 @@ $('consent-toggle').addEventListener('click', () => perform(async () => {
   state = await api(`/customers/${selected}/consent`, 'POST', consent);
   render();
 }));
+$('personalization-toggle').addEventListener('click', () => perform(async () => {
+  state = await api(`/customers/${selected}/personalization-consent`, 'POST', {
+    value: state.customer_profile.signals.personalization_consent.value !== true,
+    source: 'declared', observed_at: new Date().toISOString().slice(0, 10),
+    valid_until: new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10),
+  });
+  render();
+}));
+$('profile-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const fact = (value) => ({ value, source: 'declared', observed_at: state.analysis_date });
+  const attributes = { employment_status: fact($('profile-employment').value), household_status: fact($('profile-household').value) };
+  if ($('profile-birth').value) attributes.date_of_birth = fact($('profile-birth').value);
+  if ($('profile-dependents').value !== '') attributes.dependents_count = fact(Number($('profile-dependents').value));
+  perform(async () => { state = await api(`/customers/${selected}/context`, 'POST', { attributes }); $('profile-birth').value = ''; render(); });
+});
+$('profile-categories').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-category]');
+  if (button) perform(async () => { state = await api(`/customers/${selected}/categories/${encodeURIComponent(button.dataset.category)}/feedback`, 'POST', { status: button.dataset.response }); render(); });
+});
 $('personalization').addEventListener('click', (event) => {
   const feedback = event.target.closest('[data-feedback]');
   if (feedback) perform(async () => { state = await api(`/customers/${selected}/insights/${feedback.dataset.id}/feedback`, 'POST', { status: feedback.dataset.feedback }); render(); });

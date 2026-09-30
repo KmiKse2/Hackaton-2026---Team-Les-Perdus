@@ -42,7 +42,15 @@ flutter run -d chrome --web-port 5173 --dart-define=API_BASE_URL=http://localhos
 
 Sans Chrome : `flutter run -d web-server --web-port 5173`, puis ouvrir http://localhost:5173. Les cibles Android/iOS ne sont pas fournies ni validées ; Flutter web est la cible de démonstration.
 
-## Ce qui change en V2
+## Profils et catalogue V3
+
+Les **40 signaux du catalogue fourni** sont maintenant pris en charge, avec source, confiance, date, statut et disponibilité. Les profils distinguent les faits déclarés/KYC (âge, emploi, situation familiale) des catégories inférées à confirmer. Le consentement à la personnalisation est distinct de l’accès bancaire.
+
+Le tableau de bord permet de modifier les profils fictifs et de consulter le catalogue ; Flutter affiche les catégories. Les sources absentes restent inconnues. Voir les [règles, sources et nouvelles routes](docs/customer-signals.md) et le [catalogue original](docs/kbc_lifeflow_signal_catalog.txt).
+
+Validation V3 : **56 tests backend réussis**, analyse Flutter sans erreur et compilation web réussie. Contrôle Edge sur une base isolée : modification du profil, confirmation persistante, consentement séparé, catalogue, affichage mobile et profil Flutter. Les tests ajoutés couvrent notamment les catégories, consentements, périodes complètes, revenus, transferts d’épargne, historiques de soldes et sources déclarées.
+
+## Moteur bancaire hérité de V2
 
 ```text
 Comptes + soldes + rapports booked/pending + consentement

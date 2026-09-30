@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from fastapi import HTTPException
 from sqlalchemy import case, delete, or_, select, update
 
-from ..models import Account, Balance, BankProfile, BankTransaction, Consent
+from ..models import Account, Balance, BalanceObservation, BankProfile, BankTransaction, Consent
 from ..schemas import AccountAccess, BankingImport
 from .engine import analyze
 
@@ -54,7 +54,7 @@ def set_consent(db, customer_id, payload: AccountAccess):
 
 def store_import(db, customer_id, payload: BankingImport, automatic=False):
     required = {"accounts"}
-    if any(a.balances is not None for a in payload.accounts):
+    if any(a.balances is not None or a.balanceHistory is not None for a in payload.accounts):
         required.add("balances")
     if any(a.transactions is not None for a in payload.accounts):
         required.add("transactions")
@@ -94,6 +94,8 @@ def store_import(db, customer_id, payload: BankingImport, automatic=False):
         if item.transactions is not None:
             account.history_from, account.history_to = item.historyFrom, item.historyTo
         db.flush()
+        for balance in (item.balanceHistory or []) + (item.balances or []):
+            record_balance(db, resource_id, balance.model_dump(mode="json", exclude_none=True))
         if item.balances is not None:
             db.execute(delete(Balance).where(Balance.account_id == resource_id))
             for balance in item.balances:
@@ -126,5 +128,27 @@ def inspect(db, customer_id):
     balances = list(db.scalars(select(Balance).where(Balance.account_id.in_(ids)))) if "balances" in access["effective_permissions"] else []
     transactions = list(db.scalars(select(BankTransaction).where(BankTransaction.account_id.in_(ids)))) if "transactions" in access["effective_permissions"] else []
     profile = db.get(BankProfile, customer_id)
-    analysis = analyze(accounts, balances, transactions, access, profile.as_of if profile else today())
+    from .context import personalization_allowed
+    personalize = personalization_allowed(db, customer_id)
+    analysis = analyze(accounts, balances, transactions, access, profile.as_of if profile else today(), personalization=personalize)
+    for signal in analysis["signals"]:
+        signal.update(value=True, confidence=.9 if signal["strength"] == "strong" else .65,
+                      confidence_kind="heuristic_not_calibrated", timestamp=signal["as_of"],
+                      source="transaction" if signal["transaction_ids"] else "account",
+                      status="observed" if signal["strength"] == "strong" else "inferred")
+    if not personalize:
+        analysis["blocked"] = True
+        analysis["signals"], analysis["events"] = [], []
+        analysis["quality"]["warnings"].append("Consentement à la personnalisation absent, expiré ou désactivé.")
     return analysis, access, accounts, balances
+
+
+def record_balance(db, account_id, payload):
+    day = date.fromisoformat(payload["referenceDate"])
+    row = db.scalar(select(BalanceObservation).where(BalanceObservation.account_id == account_id,
+        BalanceObservation.balance_type == payload["balanceType"], BalanceObservation.reference_date == day))
+    if row is None:
+        row = BalanceObservation(account_id=account_id, balance_type=payload["balanceType"], reference_date=day)
+        db.add(row)
+    row.payload = payload
+    db.flush()

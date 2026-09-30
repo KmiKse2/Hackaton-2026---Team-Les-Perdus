@@ -138,6 +138,59 @@ class _CustomerScreenState extends State<CustomerScreen> {
       ? 'Indisponible'
       : '${double.parse(value.toString()).toStringAsFixed(2).replaceAll('.', ',')} ${currency == 'EUR' ? '€' : currency}';
 
+  Widget _profileCategory(Map<String, dynamic> category) {
+    const labels = {
+      'student': 'Étudiant',
+      'employed': 'Salarié',
+      'self_employed': 'Indépendant',
+      'unemployed': 'Sans emploi',
+      'retired': 'Retraité',
+      'single': 'Célibataire',
+      'married': 'Marié',
+      'cohabiting': 'Cohabitant',
+      'divorced': 'Divorcé',
+      'under_18': 'Moins de 18 ans',
+      '66+': '66 ans et plus'
+    };
+    final inferred = category['status'] == 'inferred';
+    final value = category['value'];
+    final title = value == true
+        ? category['label'].toString()
+        : '${category['label']} : ${labels[value] ?? value}';
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+          color: inferred ? const Color(0xFFFFF7E5) : Colors.white,
+          borderRadius: BorderRadius.circular(12)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(title,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 5),
+        Text(
+            inferred
+                ? 'Une hypothèse à confirmer avec vous.'
+                : 'Information fournie ou confirmée.',
+            style: const TextStyle(fontSize: 10, color: Colors.blueGrey)),
+        if (inferred)
+          Wrap(spacing: 8, children: [
+            TextButton(
+                onPressed: _busy
+                    ? null
+                    : () => _mutate('categories/${category['key']}/feedback',
+                        body: {'status': 'confirmed'}),
+                child: const Text('Confirmer')),
+            TextButton(
+                onPressed: _busy
+                    ? null
+                    : () => _mutate('categories/${category['key']}/feedback',
+                        body: {'status': 'rejected'}),
+                child: const Text('Ce n’est pas le cas')),
+          ]),
+      ]),
+    );
+  }
+
   Widget _insight(Map<String, dynamic> event) {
     final copy = event['personalization'] as Map<String, dynamic>;
     final confirmed = event['status'] == 'confirmed';
@@ -221,6 +274,11 @@ class _CustomerScreenState extends State<CustomerScreen> {
     final suspended = _state?['kate_context']?['status'] == 'blocked';
     final currency = financial?['currency'] as String? ?? 'EUR';
     final accounts = _state?['accounts'] as List<dynamic>? ?? [];
+    final profile = _state?['customer_profile'] as Map<String, dynamic>?;
+    final categories = (profile?['categories'] as List<dynamic>? ?? [])
+        .cast<Map<String, dynamic>>()
+        .where((c) => c['status'] != 'rejected' && c['status'] != 'expired')
+        .toList();
     return Scaffold(
       appBar: AppBar(
           title: const Text('LifeFlow.',
@@ -332,7 +390,7 @@ class _CustomerScreenState extends State<CustomerScreen> {
                               color: const Color(0xFFFFF4DF),
                               borderRadius: BorderRadius.circular(12)),
                           child: const Text(
-                              'L’accès aux données est suspendu. Les suggestions restent masquées tant que le consentement nécessaire n’est pas actif.',
+                              'La personnalisation est suspendue. Les suggestions restent masquées tant que les consentements nécessaires ne sont pas actifs.',
                               style: TextStyle(fontSize: 12, height: 1.6))),
                     const SizedBox(height: 26),
                     Text('Pour vous',
@@ -360,6 +418,13 @@ class _CustomerScreenState extends State<CustomerScreen> {
                                         color: Colors.blueGrey, height: 1.6))
                               ])),
                     ...events.map(_insight),
+                    if (categories.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Text('Votre profil',
+                          style: Theme.of(context).textTheme.titleLarge),
+                      const SizedBox(height: 12),
+                      ...categories.map(_profileCategory),
+                    ],
                     const SizedBox(height: 12),
                     Text('Dernières opérations',
                         style: Theme.of(context).textTheme.titleLarge),

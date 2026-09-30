@@ -61,6 +61,7 @@ class ReportTransaction(WireModel):
     remittanceInformationStructured: str | None = Field(default=None, max_length=200)
     bankTransactionCode: dict[str, str] | str | None = None
     purposeCode: str | None = Field(default=None, pattern=r"^[A-Z0-9]{4}$")
+    merchantCountry: str | None = Field(default=None, pattern=r"^[A-Z]{2}$")
 
 
 class AccountReport(WireModel):
@@ -89,12 +90,17 @@ class AccountAccess(WireModel):
 class AccountImport(WireModel):
     details: AccountDetails
     balances: list[AccountBalance] | None = Field(default=None, max_length=4)
+    balanceHistory: list[AccountBalance] | None = Field(default=None, max_length=2000)
     transactions: AccountReport | None = None
     historyFrom: date | None = None
     historyTo: date | None = None
 
     @model_validator(mode="after")
     def consistency(self):
+        if self.balanceHistory is not None:
+            keys = [(b.balanceType, b.referenceDate) for b in self.balanceHistory]
+            if len(set(keys)) != len(keys) or any(b.balanceAmount.currency != self.details.currency for b in self.balanceHistory):
+                raise ValueError("Historique de soldes dupliqué ou devise incohérente")
         if self.balances is not None:
             if len({b.balanceType for b in self.balances}) != len(self.balances):
                 raise ValueError("Un seul snapshot par type de solde")
@@ -122,6 +128,6 @@ class BankingImport(WireModel):
             raise ValueError("Compte dupliqué")
         if any(a.historyTo and a.historyTo > self.asOf for a in self.accounts):
             raise ValueError("historyTo doit être antérieur ou égal à asOf")
-        if any(b.referenceDate > self.asOf for a in self.accounts for b in a.balances or []):
+        if any(b.referenceDate > self.asOf for a in self.accounts for b in (a.balances or []) + (a.balanceHistory or [])):
             raise ValueError("Solde postérieur à asOf")
         return self

@@ -84,3 +84,34 @@ class Consent(Base):
     account_ids: Mapped[list] = mapped_column(JSON)
     sync_day: Mapped[DateValue | None] = mapped_column(Date)
     sync_count: Mapped[int] = mapped_column(default=0)
+
+
+class CustomerContext(Base):
+    __tablename__ = "customer_contexts"
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), primary_key=True)
+    attributes: Mapped[dict] = mapped_column(JSON, default=dict)
+    products: Mapped[dict | None] = mapped_column(JSON)
+    usage: Mapped[dict | None] = mapped_column(JSON)
+    personalization: Mapped[dict] = mapped_column(JSON)
+    synthetic: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class BalanceObservation(Base):
+    __tablename__ = "balance_observations"
+    __table_args__ = (UniqueConstraint("account_id", "balance_type", "reference_date"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    account_id: Mapped[str] = mapped_column(ForeignKey("bank_accounts.resource_id"), index=True)
+    balance_type: Mapped[str] = mapped_column(String(30))
+    reference_date: Mapped[DateValue] = mapped_column(Date)
+    payload: Mapped[dict] = mapped_column(JSON)
+
+
+class CategoryFeedback(Base):
+    __tablename__ = "category_feedback"
+    __table_args__ = (UniqueConstraint("customer_id", "category"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    category: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(20))
+    observed_at: Mapped[DateValue] = mapped_column(Date)
+    valid_until: Mapped[DateValue] = mapped_column(Date)

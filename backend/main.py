@@ -1,7 +1,7 @@
 import os
 import secrets
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal
@@ -17,10 +17,14 @@ from sqlalchemy.orm import Session
 
 from .bank_seed import bootstrap, fixture, legacy_payload, reset_demo
 from .database import Base, SessionLocal, engine, get_db
-from .models import Account, Balance, BankProfile, BankTransaction, Consent, Customer, Insight, Transaction
+from .models import Account, Balance, BankProfile, BankTransaction, CategoryFeedback, Consent, Customer, Insight, Transaction
+from .context_schemas import CategoryResponse, ContextImport, PersonalizationConsent
 from .schemas import AccountAccess, BankingImport
 from .seed import SCENARIOS, seed
-from .services.banking import access_for, inspect, require_access, set_consent, store_import
+from .services.banking import access_for, inspect, record_balance, require_access, set_consent, store_import, today
+from .services.context import bootstrap_context, update_context, update_personalization
+from .services.catalog import METADATA, SIGNALS
+from .services.customer_state import STATE_LABELS, compute_catalog
 from .services.kate import handoff, personalize
 
 
@@ -30,13 +34,20 @@ async def lifespan(app):
     with SessionLocal() as db:
         seed(db)
         bootstrap(db)
+        bootstrap_context(db)
+        for old in db.scalars(select(Insight).where(Insight.status.in_(["confirmed", "dismissed"]))):
+            category = {"MOVING": "moving", "TRAVEL": "travelling"}.get(old.type)
+            if category and db.scalar(select(CategoryFeedback).where(CategoryFeedback.customer_id == old.customer_id, CategoryFeedback.category == category)) is None:
+                save_category_response(db, old.customer_id, category, "confirmed" if old.status == "confirmed" else "rejected")
+        for balance in db.scalars(select(Balance)):
+            record_balance(db, balance.account_id, balance.payload)
         for customer in db.scalars(select(Customer)):
             refresh_insights(db, customer.id)
         db.commit()
     yield
 
 
-app = FastAPI(title="LifeFlow · Signal Engine for Kate", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="LifeFlow · Customer Intelligence for Kate", version="0.3.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(","),
                    allow_methods=["GET", "POST"], allow_headers=["Content-Type", "X-Demo-Token"])
 
@@ -83,6 +94,9 @@ def snapshot(db, customer):
         saved = stored.get(event["type"])
         if saved:
             events.append(dict(event, id=saved.id, status=saved.status, personalization=personalize(event)))
+    profile = compute_catalog(db, customer.id, analysis, access, accounts, balances)
+    kate = handoff(analysis, events)
+    kate["customer_profile"] = profile
     return {"customer": {"id": customer.id, "name": customer.name, "persona": customer.persona,
                          "initials": customer.initials, "simulated": customer.simulated},
             "financial": analysis["financial"], "signals": analysis["signals"], "events": events,
@@ -90,13 +104,69 @@ def snapshot(db, customer):
             "consent": access, "data_quality": analysis["quality"],
             "accounts": [{**{k: a.details.get(k) for k in ("resourceId", "name", "currency", "cashAccountType", "status", "usage")},
                           "balances": [b.payload for b in balances if b.account_id == a.resource_id]} for a in accounts],
-            "kate_context": handoff(analysis, events)}
+            "customer_profile": profile, "kate_context": kate}
 
 
 @app.get("/health")
 def health(db: Session = Depends(get_db)):
     db.execute(select(1))
-    return {"status": "ok", "mode": "synthetic-demo", "version": "0.2.0", "kate": "contract_only"}
+    return {"status": "ok", "mode": "synthetic-demo", "version": "0.3.0", "kate": "contract_only"}
+
+
+@app.get("/api/signal-catalog", dependencies=protected)
+def signal_catalog():
+    return {"signals": [{"key": k, "label": v[0], "source": v[1]} for k, v in SIGNALS.items()],
+            "metadata": METADATA, "confidence_note": "Les confiances heuristiques ne sont pas des probabilités calibrées."}
+
+
+@app.get("/api/customers/{customer_id}/profile", dependencies=protected)
+def customer_profile(customer_id: int, db: Session = Depends(get_db)):
+    return snapshot(db, customer_or_404(db, customer_id))["customer_profile"]
+
+
+@app.post("/api/customers/{customer_id}/context", dependencies=protected)
+def import_context(customer_id: int, payload: ContextImport, db: Session = Depends(get_db)):
+    customer = customer_or_404(db, customer_id, lock=True)
+    update_context(db, customer_id, payload)
+    db.commit()
+    return snapshot(db, customer)
+
+
+@app.post("/api/customers/{customer_id}/personalization-consent", dependencies=protected)
+def personalization_consent(customer_id: int, payload: PersonalizationConsent, db: Session = Depends(get_db)):
+    customer = customer_or_404(db, customer_id, lock=True)
+    update_personalization(db, customer_id, payload)
+    refresh_insights(db, customer_id)
+    db.commit()
+    return snapshot(db, customer)
+
+
+def save_category_response(db, customer_id, category, status):
+    row = db.scalar(select(CategoryFeedback).where(CategoryFeedback.customer_id == customer_id, CategoryFeedback.category == category))
+    if row is None:
+        row = CategoryFeedback(customer_id=customer_id, category=category)
+        db.add(row)
+    row.status, row.observed_at, row.valid_until = status, today(), today() + timedelta(days=90)
+    db.flush()
+
+
+@app.post("/api/customers/{customer_id}/categories/{category}/feedback", dependencies=protected)
+def category_response(customer_id: int, category: str, payload: CategoryResponse, db: Session = Depends(get_db)):
+    customer = customer_or_404(db, customer_id, lock=True)
+    state = snapshot(db, customer)
+    if state["customer_profile"]["blocked"]:
+        raise HTTPException(403, "Personnalisation non autorisée")
+    current = next((c for c in state["customer_profile"]["categories"] if c["key"] == category), None)
+    if category not in STATE_LABELS or not current or current["source"] not in {"inferred", "kate_confirmation"}:
+        raise HTTPException(422, "Seules les catégories déduites peuvent être confirmées ou refusées ici")
+    save_category_response(db, customer_id, category, payload.status)
+    event_type = {"moving": "MOVING", "travelling": "TRAVEL"}.get(category)
+    if event_type:
+        item = db.scalar(select(Insight).where(Insight.customer_id == customer_id, Insight.type == event_type))
+        if item:
+            item.status = "confirmed" if payload.status == "confirmed" else "dismissed"
+    db.commit()
+    return snapshot(db, customer)
 
 
 @app.get("/api/customers", dependencies=protected)
@@ -211,6 +281,7 @@ def reset(customer_id: int, db: Session = Depends(get_db)):
     require_access(db, customer_id, ["accounts", "balances", "transactions"])
     reset_demo(db, customer)
     db.execute(delete(Insight).where(Insight.customer_id == customer_id))
+    db.execute(delete(CategoryFeedback).where(CategoryFeedback.customer_id == customer_id))
     customer.simulated = False
     refresh_insights(db, customer_id)
     db.commit()
@@ -230,6 +301,9 @@ def feedback(customer_id: int, insight_id: int, payload: Feedback, db: Session =
     if item is None or item.type not in active:
         raise HTTPException(404, "Événement actif introuvable pour ce client")
     item.status = payload.status
+    category = {"MOVING": "moving", "TRAVEL": "travelling"}.get(item.type)
+    if category:
+        save_category_response(db, customer_id, category, "confirmed" if payload.status == "confirmed" else "rejected")
     db.commit()
     return snapshot(db, customer)
 

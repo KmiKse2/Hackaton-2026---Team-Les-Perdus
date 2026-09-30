@@ -20,3 +20,24 @@
 .kate-panel summary { cursor: pointer; font-size: 11px; color: var(--blue); }
 .kate-panel pre { max-height: 300px; overflow: auto; padding: 14px; background: #f6f8fc; border-radius: 8px; font-size: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .credit-note { color: #866630; background: #fff8e9; border-radius: 8px; font-size: 10px; padding: 12px; margin-bottom: 20px; line-height: 1.6; }
+.profile-panel { margin-bottom: 28px; }
+#profile-categories { display: flex; flex-wrap: wrap; gap: 10px; }
+.profile-category { background: #f1f6ff; border: 1px solid #dce7fa; border-radius: 10px; padding: 14px; flex: 1 1 180px; }
+.profile-category strong { font-size: 12px; }
+.profile-category small { display: block; font-size: 9px; color: #7083a0; margin-top: 8px; }
+.profile-category.inferred { background: #fff8e9; border-color: #f1e3bc; }
+.profile-category.rejected, .profile-category.expired { background: #f4f4f4; opacity: .65; }
+.category-feedback { display: flex; gap: 6px; margin-top: 12px; }
+.category-feedback button { padding: 7px 10px; font-size: 10px; }
+#profile-note { font-size: 10px; margin-top: 16px; }
+.profile-actions { margin: 16px 0; }
+.profile-panel > details { margin-top: 14px; }
+.profile-panel summary { cursor: pointer; color: #476aa1; font-size: 12px; }
+#profile-form { display: flex; flex-wrap: wrap; gap: 14px; padding: 18px 0; align-items: end; }
+#profile-form label { font-size: 10px; color: #71829a; }
+#profile-form input, #profile-form select { display: block; padding: 9px; margin-top: 6px; border: 1px solid #dce5f1; border-radius: 6px; max-width: 200px; font: inherit; background: white; }
+#catalog-signals { max-height: 450px; overflow: auto; margin-top: 16px; }
+.catalog-row { border-top: 1px solid var(--line); padding: 12px 0; }
+.catalog-row summary { display: flex; justify-content: space-between; gap: 10px; }
+.catalog-row small { font-size: 9px; color: #8b9cb3; }
+.catalog-row pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 10px; background: #f6f8fc; padding: 12px; }

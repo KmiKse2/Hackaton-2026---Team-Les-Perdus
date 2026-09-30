@@ -21,7 +21,7 @@ def handoff(analysis, events):
     return {
         "schema_version": "1.0", "integration": "contract_only", "sent_to_kate": False,
         "as_of": analysis["as_of"], "status": "blocked" if analysis["blocked"] else "ready",
-        "observations": [{key: s[key] for key in ("id", "type", "label", "strength", "metrics", "limitations")}
+        "observations": [{key: s[key] for key in ("id", "type", "label", "strength", "metrics", "limitations", "value", "confidence", "confidence_kind", "source", "timestamp", "status")}
                          for s in analysis["signals"]],
         "hypotheses": hypotheses, "rejected_hypotheses": sorted(rejected),
         "data_quality": analysis["quality"],
